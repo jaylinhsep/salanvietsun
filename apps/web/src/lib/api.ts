@@ -92,6 +92,29 @@ export interface Voyage {
   dest_name: string;
   dest_lat?: number;
   dest_lng?: number;
+  detail_count?: number;
+  detail_teus?: number;
+  detail_revenue?: number;
+}
+
+export type ContType = '20E' | '20F' | '40E' | '40F';
+
+export interface VoyageContainer {
+  id: string;
+  voyage_id: string;
+  barge_code?: string;
+  trip_no?: string;
+  container_no: string;
+  origin_name?: string;
+  destination_name?: string;
+  shipper_name?: string;
+  departure_date?: string;
+  cont_type: ContType;
+  unit_price: number;
+  baf: number;
+  total_amount: number;
+  fuel_price_no_vat: number;
+  notes?: string;
 }
 
 export interface Order {

@@ -21,6 +21,28 @@ export class DispatchService implements OnModuleInit {
         ALTER TABLE voyages ADD COLUMN IF NOT EXISTS total_teus INT DEFAULT 0;
         ALTER TABLE voyages ADD COLUMN IF NOT EXISTS vessel_berth_date DATE;
         ALTER TABLE voyages ADD COLUMN IF NOT EXISTS order_deadline DATE;
+
+        CREATE TABLE IF NOT EXISTS voyage_containers (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          voyage_id UUID NOT NULL REFERENCES voyages(id) ON DELETE CASCADE,
+          barge_code VARCHAR(80),
+          trip_no VARCHAR(80),
+          container_no VARCHAR(40) NOT NULL,
+          origin_name VARCHAR(150),
+          destination_name VARCHAR(150),
+          shipper_name VARCHAR(150),
+          departure_date DATE,
+          cont_type VARCHAR(10) NOT NULL DEFAULT '20F',
+          unit_price NUMERIC(14, 2) NOT NULL DEFAULT 0,
+          baf NUMERIC(14, 2) NOT NULL DEFAULT 0,
+          total_amount NUMERIC(14, 2) NOT NULL DEFAULT 0,
+          fuel_price_no_vat NUMERIC(14, 2) NOT NULL DEFAULT 0,
+          notes TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_voyage_containers_voyage_id ON voyage_containers(voyage_id);
+        CREATE INDEX IF NOT EXISTS idx_voyage_containers_container_no ON voyage_containers(container_no);
       `);
     } catch (err: any) {
       this.logger.warn(`Auto-migration voyages skipped: ${err.message}`);
@@ -146,13 +168,25 @@ export class DispatchService implements OnModuleInit {
         vy.origin_port_id, op.code AS origin_code, op.name AS origin_name,
         ST_Y(op.location::geometry) AS origin_lat, ST_X(op.location::geometry) AS origin_lng,
         vy.destination_port_id, dp.code AS dest_code, dp.name AS dest_name,
-        ST_Y(dp.location::geometry) AS dest_lat, ST_X(dp.location::geometry) AS dest_lng
+        ST_Y(dp.location::geometry) AS dest_lat, ST_X(dp.location::geometry) AS dest_lng,
+        COALESCE(vc.detail_count, 0) AS detail_count,
+        COALESCE(vc.detail_teus, 0) AS detail_teus,
+        COALESCE(vc.detail_revenue, 0) AS detail_revenue
       FROM voyages vy
       LEFT JOIN customers c ON c.id = vy.customer_id
       LEFT JOIN vessels v ON v.id = vy.vessel_id
       LEFT JOIN orders o ON o.id = vy.order_id
       LEFT JOIN ports op ON op.id = vy.origin_port_id
       LEFT JOIN ports dp ON dp.id = vy.destination_port_id
+      LEFT JOIN (
+        SELECT
+          voyage_id,
+          COUNT(*)::int AS detail_count,
+          COALESCE(SUM(CASE WHEN cont_type IN ('40E', '40F') THEN 2 ELSE 1 END), 0)::int AS detail_teus,
+          COALESCE(SUM(total_amount), 0)::float AS detail_revenue
+        FROM voyage_containers
+        GROUP BY voyage_id
+      ) vc ON vc.voyage_id = vy.id
       ORDER BY COALESCE(vy.received_date, vy.created_at::date) DESC, vy.created_at DESC
     `);
     return res.rows;
@@ -322,5 +356,226 @@ export class DispatchService implements OnModuleInit {
       [id, status],
     );
     return res.rows[0];
+  }
+
+  // --- VOYAGE CONTAINERS (CHI TIẾT TỪNG CHUYẾN) ---
+  private normalizeContType(raw?: string): '20E' | '20F' | '40E' | '40F' {
+    const up = (raw || '20F').trim().toUpperCase().replace(/[^0-9A-Z]/g, '');
+    if (up === '20E' || up === '20F' || up === '40E' || up === '40F') {
+      return up;
+    }
+    return '20F';
+  }
+
+  private normalizeContainerPayload(dto: any) {
+    const unitPrice = Number(dto.unit_price || 0);
+    const baf = Number(dto.baf || 0);
+    const hasExplicitTotal =
+      dto.total_amount !== undefined && dto.total_amount !== null && dto.total_amount !== '';
+    const totalAmount = hasExplicitTotal ? Number(dto.total_amount) : unitPrice + baf;
+    const depDate = dto.departure_date ? String(dto.departure_date).trim().slice(0, 10) : null;
+
+    return {
+      barge_code: dto.barge_code ? String(dto.barge_code).trim() : null,
+      trip_no: dto.trip_no ? String(dto.trip_no).trim() : null,
+      container_no: String(dto.container_no || '').trim().toUpperCase(),
+      origin_name: dto.origin_name ? String(dto.origin_name).trim() : null,
+      destination_name: dto.destination_name ? String(dto.destination_name).trim() : null,
+      shipper_name: dto.shipper_name ? String(dto.shipper_name).trim() : null,
+      departure_date: depDate || null,
+      cont_type: this.normalizeContType(dto.cont_type),
+      unit_price: Number.isFinite(unitPrice) ? unitPrice : 0,
+      baf: Number.isFinite(baf) ? baf : 0,
+      total_amount: Number.isFinite(totalAmount) ? totalAmount : 0,
+      fuel_price_no_vat: Number(dto.fuel_price_no_vat || 0) || 0,
+      notes: dto.notes ? String(dto.notes).trim() : null,
+    };
+  }
+
+  async listVoyageContainers(voyageId: string) {
+    const res = await this.db.query(
+      `
+      SELECT
+        id, voyage_id, barge_code, trip_no, container_no,
+        origin_name, destination_name, shipper_name,
+        departure_date, cont_type,
+        unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
+        notes, created_at, updated_at
+      FROM voyage_containers
+      WHERE voyage_id = $1
+      ORDER BY departure_date ASC NULLS LAST, created_at ASC, id ASC
+      `,
+      [voyageId],
+    );
+    return res.rows;
+  }
+
+  async createVoyageContainer(voyageId: string, dto: any) {
+    const p = this.normalizeContainerPayload(dto);
+    const res = await this.db.query(
+      `
+      INSERT INTO voyage_containers (
+        voyage_id, barge_code, trip_no, container_no,
+        origin_name, destination_name, shipper_name, departure_date,
+        cont_type, unit_price, baf, total_amount, fuel_price_no_vat, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING
+        id, voyage_id, barge_code, trip_no, container_no,
+        origin_name, destination_name, shipper_name,
+        departure_date, cont_type,
+        unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
+        notes, created_at, updated_at
+      `,
+      [
+        voyageId,
+        p.barge_code,
+        p.trip_no,
+        p.container_no,
+        p.origin_name,
+        p.destination_name,
+        p.shipper_name,
+        p.departure_date,
+        p.cont_type,
+        p.unit_price,
+        p.baf,
+        p.total_amount,
+        p.fuel_price_no_vat,
+        p.notes,
+      ],
+    );
+    return res.rows[0];
+  }
+
+  async bulkCreateVoyageContainers(
+    voyageId: string,
+    payload: { rows: any[]; replace?: boolean },
+  ) {
+    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    const normalized = rows
+      .map((r) => this.normalizeContainerPayload(r))
+      .filter((r) => r.container_no.length > 0);
+
+    return this.db.transaction(async (client) => {
+      if (payload?.replace) {
+        await client.query(`DELETE FROM voyage_containers WHERE voyage_id = $1`, [voyageId]);
+      }
+      const inserted = [];
+      for (const p of normalized) {
+        const res = await client.query(
+          `
+          INSERT INTO voyage_containers (
+            voyage_id, barge_code, trip_no, container_no,
+            origin_name, destination_name, shipper_name, departure_date,
+            cont_type, unit_price, baf, total_amount, fuel_price_no_vat, notes
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          RETURNING
+            id, voyage_id, barge_code, trip_no, container_no,
+            origin_name, destination_name, shipper_name,
+            departure_date, cont_type,
+            unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
+            notes, created_at, updated_at
+          `,
+          [
+            voyageId,
+            p.barge_code,
+            p.trip_no,
+            p.container_no,
+            p.origin_name,
+            p.destination_name,
+            p.shipper_name,
+            p.departure_date,
+            p.cont_type,
+            p.unit_price,
+            p.baf,
+            p.total_amount,
+            p.fuel_price_no_vat,
+            p.notes,
+          ],
+        );
+        inserted.push(res.rows[0]);
+      }
+      return { insertedCount: inserted.length, rows: inserted };
+    });
+  }
+
+  async updateVoyageContainer(containerId: string, dto: any) {
+    const p = this.normalizeContainerPayload(dto);
+    const res = await this.db.query(
+      `
+      UPDATE voyage_containers
+      SET
+        barge_code = COALESCE($2, barge_code),
+        trip_no = COALESCE($3, trip_no),
+        container_no = CASE WHEN $4 <> '' THEN $4 ELSE container_no END,
+        origin_name = COALESCE($5, origin_name),
+        destination_name = COALESCE($6, destination_name),
+        shipper_name = COALESCE($7, shipper_name),
+        departure_date = COALESCE($8, departure_date),
+        cont_type = $9,
+        unit_price = $10,
+        baf = $11,
+        total_amount = $12,
+        fuel_price_no_vat = $13,
+        notes = $14,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id, voyage_id, barge_code, trip_no, container_no,
+        origin_name, destination_name, shipper_name,
+        departure_date, cont_type,
+        unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
+        notes, created_at, updated_at
+      `,
+      [
+        containerId,
+        p.barge_code,
+        p.trip_no,
+        p.container_no,
+        p.origin_name,
+        p.destination_name,
+        p.shipper_name,
+        p.departure_date,
+        p.cont_type,
+        p.unit_price,
+        p.baf,
+        p.total_amount,
+        p.fuel_price_no_vat,
+        p.notes,
+      ],
+    );
+    return res.rows[0];
+  }
+
+  async deleteVoyageContainer(containerId: string) {
+    await this.db.query(`DELETE FROM voyage_containers WHERE id = $1`, [containerId]);
+    return { ok: true };
+  }
+
+  async syncVoyageCountsFromDetails(voyageId: string) {
+    const countsRes = await this.db.query(
+      `
+      SELECT
+        COUNT(*) FILTER (WHERE cont_type = '20E')::int AS c20e,
+        COUNT(*) FILTER (WHERE cont_type = '20F')::int AS c20f,
+        COUNT(*) FILTER (WHERE cont_type = '40E')::int AS c40e,
+        COUNT(*) FILTER (WHERE cont_type = '40F')::int AS c40f
+      FROM voyage_containers
+      WHERE voyage_id = $1
+      `,
+      [voyageId],
+    );
+    const c = countsRes.rows[0] || { c20e: 0, c20f: 0, c40e: 0, c40f: 0 };
+    const totalTeus = this.computeTeus(c.c20e, c.c20f, c.c40e, c.c40f);
+
+    const upd = await this.db.query(
+      `
+      UPDATE voyages
+      SET cont_20e = $2, cont_20f = $3, cont_40e = $4, cont_40f = $5, total_teus = $6
+      WHERE id = $1
+      RETURNING *
+      `,
+      [voyageId, c.c20e, c.c20f, c.c40e, c.c40f, totalTeus],
+    );
+    return upd.rows[0];
   }
 }

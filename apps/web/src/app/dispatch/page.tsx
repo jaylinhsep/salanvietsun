@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Anchor, Building2, Compass, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Anchor, Building2, Compass, ListChecks, Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   API_URL,
   FALLBACK_CUSTOMERS,
@@ -15,6 +15,7 @@ import {
   type Voyage,
 } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
+import { VoyageContainersPanel } from '@/components/VoyageContainersPanel';
 
 type TabKey = 'VOYAGES' | 'PORTS' | 'CUSTOMERS';
 
@@ -56,6 +57,7 @@ const EMPTY_CUSTOMER_FORM = {
 
 export default function DispatchPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('VOYAGES');
+  const [selectedVoyageId, setSelectedVoyageId] = useState<string | null>(null);
   const [voyages, setVoyages] = useState<Voyage[]>(FALLBACK_VOYAGES);
   const [vessels, setVessels] = useState<Vessel[]>(FALLBACK_VESSELS);
   const [ports, setPorts] = useState<Port[]>(FALLBACK_PORTS);
@@ -85,7 +87,23 @@ export default function DispatchPage() {
 
   useEffect(() => {
     loadAll();
+    if (typeof window !== 'undefined') {
+      const vid = new URLSearchParams(window.location.search).get('voyageId');
+      if (vid) setSelectedVoyageId(vid);
+    }
   }, []);
+
+  const selectVoyage = (id: string | null) => {
+    setSelectedVoyageId(id);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (id) url.searchParams.set('voyageId', id);
+      else url.searchParams.delete('voyageId');
+      window.history.replaceState({}, '', url.pathname + url.search);
+    }
+  };
+
+  const selectedVoyage = voyages.find((v) => v.id === selectedVoyageId) || null;
 
   const calcTeus = (f: typeof voyageForm) =>
     Number(f.cont_20e || 0) + Number(f.cont_20f || 0) + (Number(f.cont_40e || 0) + Number(f.cont_40f || 0)) * 2;
@@ -292,7 +310,10 @@ export default function DispatchPage() {
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         <button
-          onClick={() => setActiveTab('VOYAGES')}
+          onClick={() => {
+            setActiveTab('VOYAGES');
+            selectVoyage(null);
+          }}
           className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${
             activeTab === 'VOYAGES'
               ? 'bg-navy-900 text-white'
@@ -324,10 +345,23 @@ export default function DispatchPage() {
       </div>
 
       {/* TAB 1: VOYAGES & CONTAINERS */}
-      {activeTab === 'VOYAGES' && (
+      {activeTab === 'VOYAGES' && selectedVoyage && (
+        <VoyageContainersPanel
+          voyage={selectedVoyage}
+          ports={ports}
+          customers={customers}
+          vessels={vessels}
+          onBack={() => selectVoyage(null)}
+          onVoyageUpdated={loadAll}
+        />
+      )}
+
+      {activeTab === 'VOYAGES' && !selectedVoyage && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700">Bảng theo dõi điều độ sà lan & sản lượng TEU</span>
+            <span className="font-semibold text-slate-700">
+              Bảng theo dõi điều độ sà lan & sản lượng TEU (bấm vào từng chuyến để nhập/xem chi tiết từng container)
+            </span>
             <span className="font-bold text-rose-600 text-sm">Tổng sản lượng: {sumTeus} TEUs</span>
           </div>
           <div className="overflow-x-auto">
@@ -354,11 +388,21 @@ export default function DispatchPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {voyages.map((vy) => (
-                  <tr key={vy.id} className="hover:bg-slate-50">
+                  <tr
+                    key={vy.id}
+                    onClick={() => selectVoyage(vy.id)}
+                    className="hover:bg-sky-50/60 cursor-pointer"
+                    title="Bấm để xem hoặc nhập chi tiết container của chuyến này"
+                  >
                     <td className="px-3 py-2.5 text-slate-600">
                       {vy.received_date ? vy.received_date.slice(0, 10) : '—'}
                     </td>
-                    <td className="px-3 py-2.5 font-semibold text-navy-900">{vy.voyage_no}</td>
+                    <td className="px-3 py-2.5 font-semibold text-maritime-700 underline decoration-dotted">
+                      <div>{vy.voyage_no}</div>
+                      <div className="text-[10px] font-normal text-slate-500 no-underline">
+                        {vy.detail_count ? `${vy.detail_count} cont chi tiết` : 'Chưa nhập chi tiết'}
+                      </div>
+                    </td>
                     <td className="px-3 py-2.5">{vy.pic_name || '—'}</td>
                     <td className="px-3 py-2.5 font-medium text-slate-900">
                       {vy.customer_code ? `${vy.customer_code} (${vy.customer_name})` : vy.customer_name || '—'}
@@ -382,7 +426,16 @@ export default function DispatchPage() {
                     <td className="px-3 py-2.5">
                       <StatusBadge status={vy.status} />
                     </td>
-                    <td className="px-3 py-2.5 text-right space-x-1.5">
+                    <td
+                      className="px-3 py-2.5 text-right space-x-1.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => selectVoyage(vy.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 font-medium"
+                      >
+                        <ListChecks className="w-3 h-3" /> Chi tiết
+                      </button>
                       <button
                         onClick={() => openEditVoyage(vy)}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-100"

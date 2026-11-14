@@ -54,4 +54,43 @@ export class DispatchController {
   updateVoyageStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.dispatchService.updateVoyageStatus(id, status);
   }
+
+  @Get('voyages/:id/containers')
+  @ApiOperation({ summary: 'Danh sách chi tiết từng container theo chuyến' })
+  listVoyageContainers(@Param('id') id: string) {
+    return this.dispatchService.listVoyageContainers(id);
+  }
+
+  @Post('voyages/:id/containers')
+  @ApiOperation({ summary: 'Thêm 1 dòng container chi tiết vào chuyến' })
+  createVoyageContainer(@Param('id') id: string, @Body() body: any) {
+    return this.dispatchService.createVoyageContainer(id, body);
+  }
+
+  @Post('voyages/:id/containers/bulk')
+  @ApiOperation({ summary: 'Nhập hàng loạt danh sách container (dán từ Excel)' })
+  bulkCreateVoyageContainers(
+    @Param('id') id: string,
+    @Body() body: { rows: any[]; replace?: boolean },
+  ) {
+    return this.dispatchService.bulkCreateVoyageContainers(id, body);
+  }
+
+  @Post('voyages/:id/sync-containers')
+  @ApiOperation({ summary: 'Đồng bộ tổng số cont 20E/20F/40E/40F & TEUs lên lệnh chuyến' })
+  syncVoyageCounts(@Param('id') id: string) {
+    return this.dispatchService.syncVoyageCountsFromDetails(id);
+  }
+
+  @Patch('containers/:containerId')
+  @ApiOperation({ summary: 'Cập nhật 1 dòng container chi tiết' })
+  updateVoyageContainer(@Param('containerId') containerId: string, @Body() body: any) {
+    return this.dispatchService.updateVoyageContainer(containerId, body);
+  }
+
+  @Delete('containers/:containerId')
+  @ApiOperation({ summary: 'Xóa 1 dòng container chi tiết' })
+  deleteVoyageContainer(@Param('containerId') containerId: string) {
+    return this.dispatchService.deleteVoyageContainer(containerId);
+  }
 }
