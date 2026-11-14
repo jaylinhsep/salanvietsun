@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vietsun-tms-pwa-v1';
+const CACHE_NAME = 'vietsun-tms-pwa-v2';
 const URLS_TO_CACHE = ['/mobile', '/mobile/fuel', '/mobile/maintenance', '/mobile/profile'];
 
 self.addEventListener('install', (event) => {
@@ -19,6 +19,9 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  // Only handle /mobile routes for PWA offline fallback; never intercept frontweb routes
+  if (!url.pathname.startsWith('/mobile')) return;
   event.respondWith(
     fetch(event.request).catch(() => caches.match(event.request)),
   );
