@@ -128,21 +128,25 @@ export default function DispatchPage() {
 
   const handleSaveVoyage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingVoyageId) {
-      await fetch(`${API_URL}/dispatch/voyages/${editingVoyageId}`, {
-        method: 'PATCH',
+    try {
+      const url = editingVoyageId
+        ? `${API_URL}/dispatch/voyages/${editingVoyageId}`
+        : `${API_URL}/dispatch/voyages`;
+      const res = await fetch(url, {
+        method: editingVoyageId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(voyageForm),
-      }).catch(() => null);
-    } else {
-      await fetch(`${API_URL}/dispatch/voyages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(voyageForm),
-      }).catch(() => null);
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        alert(`Không lưu được lệnh điều độ (${res.status}): ${errText}`);
+        return;
+      }
+      setShowVoyageModal(false);
+      loadAll();
+    } catch (err: any) {
+      alert(`Lỗi kết nối API: ${err?.message || err}`);
     }
-    setShowVoyageModal(false);
-    loadAll();
   };
 
   const advanceStatus = async (vy: Voyage, nextStatus: string) => {
