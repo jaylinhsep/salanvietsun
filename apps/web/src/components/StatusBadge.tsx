@@ -25,6 +25,9 @@ const LABELS: Record<string, { text: string; cls: string }> = {
   LOW: { text: 'Thấp', cls: 'bg-slate-100 text-slate-700 border-slate-200' },
   BUNKERING: { text: 'Cấp dầu', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   CONSUMPTION: { text: 'Tiêu thụ', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  OPERATIONAL: { text: 'Hoạt động tốt', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  WARNING: { text: 'Cần kiểm tra', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  FAULTY: { text: 'Hỏng / Lỗi', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
 };
 
 export function StatusBadge({ status }: { status: string }) {

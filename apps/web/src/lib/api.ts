@@ -21,6 +21,19 @@ export interface Vessel {
   nearby_port?: string | null;
 }
 
+export interface VesselEquipment {
+  id: string;
+  vessel_id: string;
+  vessel_code?: string;
+  vessel_name?: string;
+  name: string;
+  category: 'MAIN_ENGINE' | 'GENERATOR' | 'GPS_AIS' | 'WINCH' | 'CRANE';
+  serial_no?: string;
+  running_hours: number;
+  next_service_hours?: number;
+  status: 'OPERATIONAL' | 'WARNING' | 'FAULTY';
+}
+
 export interface Port {
   id: string;
   code: string;

@@ -1,9 +1,6 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
 import { AppShell } from '@/components/AppShell';
-
-const inter = Inter({ subsets: ['latin', 'vietnamese'] });
 
 export const metadata: Metadata = {
   title: 'VietSun Barge TMS — Hệ thống Quản lý Vận tải Sà lan',
@@ -18,7 +15,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi">
-      <body className={inter.className}>
+      <body className="font-sans antialiased">
         <AppShell>{children}</AppShell>
       </body>
     </html>
