@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { AppShell } from '@/components/AppShell';
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'VietSun Barge TMS — Hệ thống Quản lý Vận tải Sà lan',
   description: 'TMS quản lý đội sà lan, điều độ chuyến, giám sát AIS/GPS, nhiên liệu, công nợ & bảo trì',

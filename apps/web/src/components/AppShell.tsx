@@ -26,6 +26,24 @@ const NAV_ITEMS = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!pathname.startsWith('/mobile') && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        for (const reg of regs) {
+          reg.unregister().catch(() => {});
+        }
+      });
+      if ('caches' in window) {
+        caches.keys().then((keys) => {
+          for (const k of keys) {
+            if (k.startsWith('vietsun-tms-pwa')) caches.delete(k).catch(() => {});
+          }
+        });
+      }
+    }
+  }, [pathname]);
+
   // Mobileweb PWA uses its own dedicated mobile-first layout
   if (pathname.startsWith('/mobile')) {
     return <>{children}</>;
