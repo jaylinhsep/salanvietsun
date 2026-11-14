@@ -1,0 +1,24 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: salanvietsun_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: salanvietsun_tms
+      POSTGRES_USER: vietsun
+      POSTGRES_PASSWORD: vietsun_secret_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vietsun -d salanvietsun_tms"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

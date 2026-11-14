@@ -1,0 +1,19 @@
+{
+  "name": "VietSun Barge TMS — Thuyền Trưởng & Hiện Trường",
+  "short_name": "VietSun TMS",
+  "description": "Ứng dụng hiện trường cho Thuyền trưởng sà lan: Check-in cảng GPS, Báo cáo nhiên liệu, Bảo trì",
+  "start_url": "/mobile",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a192f",
+  "theme_color": "#0284c7",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
