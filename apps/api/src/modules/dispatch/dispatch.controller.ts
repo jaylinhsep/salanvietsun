@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { DispatchService } from './dispatch.service';
 
@@ -13,16 +13,40 @@ export class DispatchController {
     return this.dispatchService.listPorts();
   }
 
+  @Post('ports')
+  @ApiOperation({ summary: 'Thêm mới cảng đi / cảng đến (POL/POD)' })
+  createPort(@Body() body: any) {
+    return this.dispatchService.createPort(body);
+  }
+
+  @Patch('ports/:id')
+  @ApiOperation({ summary: 'Chỉnh sửa thông tin cảng' })
+  updatePort(@Param('id') id: string, @Body() body: any) {
+    return this.dispatchService.updatePort(id, body);
+  }
+
+  @Delete('ports/:id')
+  @ApiOperation({ summary: 'Xóa cảng' })
+  deletePort(@Param('id') id: string) {
+    return this.dispatchService.deletePort(id);
+  }
+
   @Get('voyages')
-  @ApiOperation({ summary: 'Danh sách kế hoạch chuyến & điều độ sà lan' })
+  @ApiOperation({ summary: 'Danh sách kế hoạch chuyến & gán container theo sà lan/khách hàng' })
   listVoyages() {
     return this.dispatchService.listVoyages();
   }
 
   @Post('voyages')
-  @ApiOperation({ summary: 'Tạo lệnh điều độ chuyến mới (tự động tính hải lý bằng PostGIS)' })
+  @ApiOperation({ summary: 'Tạo lệnh điều độ chuyến & gán container (20E/20F/40E/40F)' })
   createVoyage(@Body() body: any) {
     return this.dispatchService.createVoyage(body);
+  }
+
+  @Patch('voyages/:id')
+  @ApiOperation({ summary: 'Chỉnh sửa chuyến, gán lại container / sà lan / khách hàng / POL / POD' })
+  updateVoyage(@Param('id') id: string, @Body() body: any) {
+    return this.dispatchService.updateVoyage(id, body);
   }
 
   @Patch('voyages/:id/status')

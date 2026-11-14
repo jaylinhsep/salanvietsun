@@ -120,6 +120,16 @@ CREATE TABLE IF NOT EXISTS voyages (
     planned_distance_nm NUMERIC(8,2),           -- Hải lý / km đường sông
     planned_route GEOGRAPHY(LineString, 4326),  -- Tuyến đường dự kiến
     status VARCHAR(30) DEFAULT 'PLANNED',       -- PLANNED | DEPARTED | IN_TRANSIT | ARRIVED | COMPLETED | CANCELLED
+    customer_id UUID REFERENCES customers(id),
+    received_date DATE DEFAULT CURRENT_DATE,
+    pic_name VARCHAR(100),
+    cont_20e INT DEFAULT 0,
+    cont_20f INT DEFAULT 0,
+    cont_40e INT DEFAULT 0,
+    cont_40f INT DEFAULT 0,
+    total_teus INT DEFAULT 0,
+    vessel_berth_date DATE,
+    order_deadline DATE,
     captain_notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );

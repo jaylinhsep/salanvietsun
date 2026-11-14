@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { OrdersService } from './orders.service';
 
@@ -11,6 +11,24 @@ export class OrdersController {
   @ApiOperation({ summary: 'Danh sách khách hàng & tổng công nợ phải thu' })
   listCustomers() {
     return this.ordersService.listCustomers();
+  }
+
+  @Post('customers')
+  @ApiOperation({ summary: 'Thêm mới khách hàng' })
+  createCustomer(@Body() body: any) {
+    return this.ordersService.createCustomer(body);
+  }
+
+  @Patch('customers/:id')
+  @ApiOperation({ summary: 'Chỉnh sửa thông tin khách hàng' })
+  updateCustomer(@Param('id') id: string, @Body() body: any) {
+    return this.ordersService.updateCustomer(id, body);
+  }
+
+  @Delete('customers/:id')
+  @ApiOperation({ summary: 'Xóa khách hàng' })
+  deleteCustomer(@Param('id') id: string) {
+    return this.ordersService.deleteCustomer(id);
   }
 
   @Get()

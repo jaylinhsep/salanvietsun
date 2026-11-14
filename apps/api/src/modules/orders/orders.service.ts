@@ -15,6 +15,79 @@ export class OrdersService {
     return res.rows;
   }
 
+  async createCustomer(dto: {
+    code: string;
+    name: string;
+    tax_code?: string;
+    address?: string;
+    contact_person?: string;
+    phone?: string;
+    email?: string;
+  }) {
+    const res = await this.db.query(
+      `
+      INSERT INTO customers (code, name, tax_code, address, contact_person, phone, email)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+      `,
+      [
+        dto.code.trim().toUpperCase(),
+        dto.name.trim(),
+        dto.tax_code ?? null,
+        dto.address ?? null,
+        dto.contact_person ?? null,
+        dto.phone ?? null,
+        dto.email ?? null,
+      ],
+    );
+    return res.rows[0];
+  }
+
+  async updateCustomer(
+    id: string,
+    dto: {
+      code?: string;
+      name?: string;
+      tax_code?: string;
+      address?: string;
+      contact_person?: string;
+      phone?: string;
+      email?: string;
+    },
+  ) {
+    const res = await this.db.query(
+      `
+      UPDATE customers
+      SET
+        code = COALESCE($2, code),
+        name = COALESCE($3, name),
+        tax_code = COALESCE($4, tax_code),
+        address = COALESCE($5, address),
+        contact_person = COALESCE($6, contact_person),
+        phone = COALESCE($7, phone),
+        email = COALESCE($8, email)
+      WHERE id = $1
+      RETURNING *
+      `,
+      [
+        id,
+        dto.code?.trim().toUpperCase() ?? null,
+        dto.name?.trim() ?? null,
+        dto.tax_code ?? null,
+        dto.address ?? null,
+        dto.contact_person ?? null,
+        dto.phone ?? null,
+        dto.email ?? null,
+      ],
+    );
+    return res.rows[0];
+  }
+
+  async deleteCustomer(id: string) {
+    await this.db.query(`DELETE FROM customers WHERE id = $1`, [id]);
+    return { ok: true };
+  }
+
   async listOrders() {
     const res = await this.db.query(`
       SELECT

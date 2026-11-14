@@ -31,7 +31,8 @@ if echo "$CHANGED_FILES" | grep -q "^apps/web/" || [ "$1" = "--force" ]; then
   if echo "$CHANGED_FILES" | grep -q "apps/web/package"; then
     npm install
   fi
-  NEXT_TELEMETRY_DISABLED=1 npm run build
+  rm -rf .next
+  NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS="--max-old-space-size=1024" npx next build --no-lint
   pm2 restart salanvietsun-web
   cd ../..
 fi

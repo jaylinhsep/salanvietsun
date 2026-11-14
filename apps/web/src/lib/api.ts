@@ -44,6 +44,17 @@ export interface Port {
   lng: number;
 }
 
+export interface Customer {
+  id: string;
+  code: string;
+  name: string;
+  tax_code?: string;
+  address?: string;
+  contact_person?: string;
+  phone?: string;
+  email?: string;
+}
+
 export interface Voyage {
   id: string;
   voyage_no: string;
@@ -52,6 +63,18 @@ export interface Voyage {
   eta: string;
   planned_distance_nm: number;
   captain_notes?: string;
+  received_date?: string;
+  pic_name?: string;
+  cont_20e?: number;
+  cont_20f?: number;
+  cont_40e?: number;
+  cont_40f?: number;
+  total_teus?: number;
+  vessel_berth_date?: string;
+  order_deadline?: string;
+  customer_id?: string;
+  customer_code?: string;
+  customer_name?: string;
   vessel_id: string;
   vessel_code: string;
   vessel_name: string;
@@ -59,9 +82,13 @@ export interface Voyage {
   order_no?: string;
   cargo_type?: string;
   cargo_weight_tons?: number;
+  origin_port_id?: string;
+  origin_code?: string;
   origin_name: string;
   origin_lat?: number;
   origin_lng?: number;
+  destination_port_id?: string;
+  dest_code?: string;
   dest_name: string;
   dest_lat?: number;
   dest_lng?: number;
@@ -148,6 +175,12 @@ export const FALLBACK_PORTS: Port[] = [
   { id: '11111111-1111-1111-1111-111111111103', code: 'CANTHO', name: 'Cảng Cái Cui - Cần Thơ', region: 'Cần Thơ', port_type: 'PORT', lat: 10.0028, lng: 105.8142 },
   { id: '11111111-1111-1111-1111-111111111104', code: 'MYTHO', name: 'Cảng Mỹ Tho', region: 'Tiền Giang', port_type: 'PORT', lat: 10.3540, lng: 106.3450 },
   { id: '11111111-1111-1111-1111-111111111106', code: 'LONGAN', name: 'Cảng Quốc tế Long An', region: 'Long An', port_type: 'PORT', lat: 10.5562, lng: 106.7368 },
+];
+
+export const FALLBACK_CUSTOMERS: Customer[] = [
+  { id: '33333333-3333-3333-3333-333333333301', code: 'KH-TANHOA', name: 'Công ty CP Logistics Tân Hòa', contact_person: 'Chị Lan Anh', phone: '0901234567' },
+  { id: '33333333-3333-3333-3333-333333333302', code: 'KH-MEKONGRICE', name: 'Tổng Công ty Lương thực Mekong', contact_person: 'Anh Hoàng', phone: '0918234567' },
+  { id: '33333333-3333-3333-3333-333333333303', code: 'KH-INSEE', name: 'Công ty Xi măng Tây Nam', contact_person: 'Anh Dũng', phone: '0987654321' },
 ];
 
 export const FALLBACK_VESSELS: Vessel[] = [
