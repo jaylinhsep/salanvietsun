@@ -105,6 +105,20 @@ export class OrdersService implements OnModuleInit {
         notes TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE accounting_port_expenses ADD COLUMN IF NOT EXISTS voyage_id UUID REFERENCES voyages(id) ON DELETE SET NULL;
+      ALTER TABLE accounting_port_expenses ADD COLUMN IF NOT EXISTS linked_trip_no VARCHAR(80);
+      ALTER TABLE accounting_fuel_entries ADD COLUMN IF NOT EXISTS voyage_id UUID REFERENCES voyages(id) ON DELETE SET NULL;
+      ALTER TABLE accounting_fuel_entries ADD COLUMN IF NOT EXISTS linked_trip_no VARCHAR(80);
+      CREATE TABLE IF NOT EXISTS accounting_historical_monthly (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        year INT NOT NULL,
+        month INT NOT NULL,
+        vessel_code VARCHAR(80) NOT NULL,
+        revenue NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        cost NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        profit NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        UNIQUE(year, month, vessel_code)
+      );
     `);
   }
 
@@ -520,15 +534,15 @@ export class OrdersService implements OnModuleInit {
     const periodMonth = `${year}-${mm}`;
     const yearPrefix = `${year}-`;
 
-    const [vesselsRes, contYearRes, fixedRes, portRes, fuelRes, suppliesRes, vendorRes] =
+    const [vesselsRes, contYearRes, fixedRes, portRes, fuelRes, suppliesRes, vendorRes, histRes] =
       await Promise.all([
         this.db.query(`SELECT id, code, name FROM vessels ORDER BY code ASC`),
         this.db.query(
           `SELECT COALESCE(NULLIF(UPPER(TRIM(barge_code)), ''), 'CHUNG') AS barge_code,
-                  TO_CHAR(COALESCE(departure_date::date, created_at::date), 'YYYY-MM') AS ym,
+                  COALESCE(NULLIF(accounting_month, ''), TO_CHAR(COALESCE(departure_date::date, created_at::date), 'YYYY-MM')) AS ym,
                   COALESCE(SUM(total_amount), 0) AS revenue
            FROM voyage_containers
-           WHERE TO_CHAR(COALESCE(departure_date::date, created_at::date), 'YYYY-MM') LIKE $1
+           WHERE COALESCE(NULLIF(accounting_month, ''), TO_CHAR(COALESCE(departure_date::date, created_at::date), 'YYYY-MM')) LIKE $1
            GROUP BY 1, 2`,
           [`${yearPrefix}%`],
         ),
@@ -551,6 +565,10 @@ export class OrdersService implements OnModuleInit {
         this.db.query(
           `SELECT * FROM accounting_vendor_costs WHERE period_month LIKE $1`,
           [`${yearPrefix}%`],
+        ),
+        this.db.query(
+          `SELECT * FROM accounting_historical_monthly WHERE year = $1`,
+          [year],
         ),
       ]);
 
@@ -714,6 +732,21 @@ export class OrdersService implements OnModuleInit {
       },
       emptyBucket('TOTAL'),
     );
+
+    for (const h of histRes.rows) {
+      const mNum = Number(h.month);
+      if (!mNum || mNum < 1 || mNum > 12) continue;
+      const code = normBarge(h.vessel_code);
+      if (!ytdMatrix.has(code)) ytdMatrix.set(code, {});
+      const row = ytdMatrix.get(code)!;
+      if (!row[mNum]) {
+        row[mNum] = {
+          revenue: Number(h.revenue || 0),
+          cost: Number(h.cost || 0),
+          profit: Number(h.profit ?? Number(h.revenue || 0) - Number(h.cost || 0)),
+        };
+      }
+    }
 
     const yearlyByBarge = Array.from(ytdMatrix.entries()).map(([vessel_code, months]) => ({
       vessel_code,

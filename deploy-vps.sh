@@ -21,8 +21,10 @@ if echo "$CHANGED_FILES" | grep -q "^apps/api/" || [ "$1" = "--force" ]; then
     npm install
   fi
   npm run build
-  pm2 restart salanvietsun-api
   cd ../..
+  echo "=== 2b. Syncing schema & snapshot data to PostgreSQL ==="
+  node scripts/sync-snapshot-to-pg.mjs || true
+  pm2 restart salanvietsun-api
 fi
 
 if echo "$CHANGED_FILES" | grep -q "^apps/web/" || [ "$1" = "--force" ]; then

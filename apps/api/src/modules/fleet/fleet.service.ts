@@ -15,7 +15,9 @@ export class FleetService {
         ST_Y(current_location::geometry) AS lat,
         ST_X(current_location::geometry) AS lng,
         current_speed_knots::float, current_fuel_liters::float,
-        captain_name, captain_phone, created_at
+        captain_name, captain_phone,
+        COALESCE(is_vendor_barge, FALSE) AS is_vendor_barge,
+        notes, created_at
       FROM vessels
       ORDER BY code ASC
     `);

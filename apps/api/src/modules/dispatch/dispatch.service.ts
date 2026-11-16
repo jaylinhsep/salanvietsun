@@ -72,6 +72,14 @@ export class DispatchService implements OnModuleInit {
 
         ALTER TABLE voyage_containers ADD COLUMN IF NOT EXISTS seal_no VARCHAR(60);
         ALTER TABLE voyage_containers ADD COLUMN IF NOT EXISTS booking_no VARCHAR(80);
+        ALTER TABLE voyage_containers ADD COLUMN IF NOT EXISTS accounting_month VARCHAR(7);
+        ALTER TABLE voyage_containers ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'PLANNED';
+        ALTER TABLE voyage_containers ALTER COLUMN voyage_id DROP NOT NULL;
+
+        ALTER TABLE vessels ADD COLUMN IF NOT EXISTS is_vendor_barge BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE vessels ADD COLUMN IF NOT EXISTS notes TEXT;
+        ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pic_name VARCHAR(100);
+        ALTER TABLE voyages DROP CONSTRAINT IF EXISTS voyages_voyage_no_key;
 
         ALTER TABLE voyages ADD COLUMN IF NOT EXISTS workflow_step INT DEFAULT 0;
         ALTER TABLE voyages ADD COLUMN IF NOT EXISTS fuel_start_liters NUMERIC(12, 2) DEFAULT 0;
@@ -618,7 +626,7 @@ export class DispatchService implements OnModuleInit {
         COALESCE(vc.departure_date, vy.received_date, vc.created_at::date) AS departure_date,
         vc.cont_type,
         vc.unit_price::float, vc.baf::float, vc.total_amount::float, vc.fuel_price_no_vat::float,
-        vc.notes, vc.created_at, vc.updated_at
+        vc.accounting_month, vc.notes, vc.created_at, vc.updated_at
       FROM voyage_containers vc
       LEFT JOIN voyages vy ON vy.id = vc.voyage_id
       LEFT JOIN vessels v ON v.id = vy.vessel_id
