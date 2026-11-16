@@ -700,14 +700,51 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, vy);
     }
 
+    if (m === 'GET' && p === '/api/dispatch/containers') {
+      const enriched = db.voyageContainers.map((c) => {
+        const vy = db.voyages.find((x) => x.id === c.voyage_id);
+        const v = vy ? db.vessels.find((vs) => vs.id === vy.vessel_id) : null;
+        return {
+          ...c,
+          barge_code: c.barge_code || v?.code || v?.name || '',
+          trip_no: c.trip_no || vy?.voyage_no || '',
+          departure_date: c.departure_date || vy?.received_date || (c.created_at || '').slice(0, 10),
+        };
+      });
+      enriched.sort((a, b) => {
+        const dA = String(a.departure_date || '').slice(0, 10);
+        const dB = String(b.departure_date || '').slice(0, 10);
+        if (dA !== dB) return dA.localeCompare(dB);
+        const bA = String(a.barge_code || '');
+        const bB = String(b.barge_code || '');
+        if (bA !== bB) return bA.localeCompare(bB, 'vi');
+        const tA = String(a.trip_no || '');
+        const tB = String(b.trip_no || '');
+        if (tA !== tB) return tA.localeCompare(tB, 'vi');
+        return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      });
+      return send(res, 200, enriched);
+    }
+
     const contMatch = p.match(/^\/api\/dispatch\/containers\/([^/]+)$/);
     if (contMatch && m === 'PATCH') {
       const body = await readBody(req);
       const idx = db.voyageContainers.findIndex((c) => c.id === contMatch[1]);
       if (idx < 0) return send(res, 404, { message: 'Container not found' });
+      const prev = db.voyageContainers[idx];
+      const merged = {
+        ...prev,
+        ...body,
+        total_amount:
+          body.total_amount !== undefined
+            ? body.total_amount
+            : body.unit_price !== undefined || body.baf !== undefined
+              ? Number(body.unit_price ?? prev.unit_price ?? 0) + Number(body.baf ?? prev.baf ?? 0)
+              : prev.total_amount,
+      };
       db.voyageContainers[idx] = {
-        ...db.voyageContainers[idx],
-        ...normalizeContainerPayload(body),
+        ...prev,
+        ...normalizeContainerPayload(merged),
         updated_at: nowIso(),
       };
       saveDb(db);

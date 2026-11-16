@@ -30,8 +30,9 @@ import {
   updateSettlementAction,
 } from '@/lib/workflow-store';
 import { StatusBadge } from '@/components/StatusBadge';
+import { AccountingOutputReportPanel } from '@/components/AccountingOutputReportPanel';
 
-type OrdersTab = 'SETTLEMENT' | 'INVOICES';
+type OrdersTab = 'SETTLEMENT' | 'YIELD' | 'INVOICES';
 
 export default function SettlementAndOrdersPage() {
   const [tab, setTab] = useState<OrdersTab>('SETTLEMENT');
@@ -234,7 +235,10 @@ export default function SettlementAndOrdersPage() {
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         <button
-          onClick={() => setTab('SETTLEMENT')}
+          onClick={() => {
+            setTab('SETTLEMENT');
+            loadAll();
+          }}
           className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${
             tab === 'SETTLEMENT'
               ? 'bg-navy-900 text-white'
@@ -242,6 +246,16 @@ export default function SettlementAndOrdersPage() {
           }`}
         >
           <Calculator className="w-4 h-4" /> Bảng Quyết toán Lãi/Lỗ Chuyến ({filteredVoyages.length})
+        </button>
+        <button
+          onClick={() => setTab('YIELD')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${
+            tab === 'YIELD'
+              ? 'bg-navy-900 text-white'
+              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <FileSpreadsheet className="w-4 h-4" /> Sản lượng & Giá cước Cont
         </button>
         <button
           onClick={() => setTab('INVOICES')}
@@ -254,6 +268,8 @@ export default function SettlementAndOrdersPage() {
           <Wallet className="w-4 h-4" /> Hóa đơn & Công nợ Khách hàng ({invoices.length})
         </button>
       </div>
+
+      {tab === 'YIELD' && <AccountingOutputReportPanel />}
 
       {tab === 'SETTLEMENT' && (
         <>

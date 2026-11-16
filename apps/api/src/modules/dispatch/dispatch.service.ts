@@ -572,21 +572,67 @@ export class DispatchService implements OnModuleInit {
     });
   }
 
+  async listAllContainers() {
+    const res = await this.db.query(`
+      SELECT
+        vc.id, vc.voyage_id,
+        COALESCE(NULLIF(vc.barge_code, ''), v.code, v.name, '') AS barge_code,
+        COALESCE(NULLIF(vc.trip_no, ''), vy.voyage_no, '') AS trip_no,
+        vc.container_no, vc.seal_no, vc.booking_no,
+        COALESCE(NULLIF(vc.origin_name, ''), op.name, '') AS origin_name,
+        COALESCE(NULLIF(vc.destination_name, ''), dp.name, '') AS destination_name,
+        COALESCE(NULLIF(vc.shipper_name, ''), c.name, '') AS shipper_name,
+        COALESCE(vc.departure_date, vy.received_date, vc.created_at::date) AS departure_date,
+        vc.cont_type,
+        vc.unit_price::float, vc.baf::float, vc.total_amount::float, vc.fuel_price_no_vat::float,
+        vc.notes, vc.created_at, vc.updated_at
+      FROM voyage_containers vc
+      LEFT JOIN voyages vy ON vy.id = vc.voyage_id
+      LEFT JOIN vessels v ON v.id = vy.vessel_id
+      LEFT JOIN ports op ON op.id = vy.origin_port_id
+      LEFT JOIN ports dp ON dp.id = vy.destination_port_id
+      LEFT JOIN customers c ON c.id = vy.customer_id
+      ORDER BY
+        COALESCE(vc.departure_date, vy.received_date, vc.created_at::date) ASC,
+        COALESCE(NULLIF(vc.barge_code, ''), v.code, v.name, '') ASC,
+        COALESCE(NULLIF(vc.trip_no, ''), vy.voyage_no, '') ASC,
+        vc.created_at ASC, vc.id ASC
+    `);
+    return res.rows;
+  }
+
   async updateVoyageContainer(containerId: string, dto: any) {
-    const p = this.normalizeContainerPayload(dto);
+    const prevRes = await this.db.query(
+      `SELECT ${DispatchService.CONTAINER_SELECT} FROM voyage_containers WHERE id = $1`,
+      [containerId],
+    );
+    const prev = prevRes.rows[0];
+    if (!prev) throw new BadRequestException('Không tìm thấy container.');
+
+    const merged = {
+      ...prev,
+      ...dto,
+      total_amount:
+        dto.total_amount !== undefined
+          ? dto.total_amount
+          : dto.unit_price !== undefined || dto.baf !== undefined
+            ? Number(dto.unit_price ?? prev.unit_price ?? 0) + Number(dto.baf ?? prev.baf ?? 0)
+            : prev.total_amount,
+    };
+    const p = this.normalizeContainerPayload(merged);
     const res = await this.db.query(
       `
       UPDATE voyage_containers
       SET
-        barge_code = COALESCE($2, barge_code),
-        trip_no = COALESCE($3, trip_no),
+        barge_code = $2,
+        trip_no = $3,
         container_no = CASE WHEN $4 <> '' THEN $4 ELSE container_no END,
         seal_no = $5,
         booking_no = $6,
-        origin_name = COALESCE($7, origin_name),
-        destination_name = COALESCE($8, destination_name),
-        shipper_name = COALESCE($9, shipper_name),
-        departure_date = COALESCE($10, departure_date),
+        origin_name = $7,
+        destination_name = $8,
+        shipper_name = $9,
+        departure_date = $10,
         cont_type = $11,
         unit_price = $12,
         baf = $13,

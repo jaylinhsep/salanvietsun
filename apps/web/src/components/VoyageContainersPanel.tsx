@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import {
   API_URL,
+  type Booking,
   type ContType,
   type Customer,
   type Port,
@@ -33,6 +34,7 @@ interface Props {
 
 interface DraftRow {
   barge_code: string;
+  booking_no: string;
   trip_no: string;
   container_no: string;
   seal_no: string;
@@ -41,10 +43,6 @@ interface DraftRow {
   shipper_name: string;
   departure_date: string;
   cont_type: ContType;
-  unit_price: number;
-  baf: number;
-  total_amount: number;
-  fuel_price_no_vat: number;
   notes: string;
 }
 
@@ -67,19 +65,15 @@ function parseExcelDate(raw?: string): string {
   const a = Number(m[1]);
   const b = Number(m[2]);
   const y = m[3];
-  // Support US MM/DD/YYYY (from Excel sample 10/21/2026) and DD/MM/YYYY when first part > 12
   const month = a > 12 ? b : a;
   const day = a > 12 ? a : b;
   return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-function formatMoney(n?: number | null): string {
-  return Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
-}
-
-function makeDefaultDraft(voyage: Voyage): DraftRow {
+function makeDefaultDraft(voyage: Voyage, defaultBookingNo = ''): DraftRow {
   return {
     barge_code: voyage.vessel_code || voyage.vessel_name || '',
+    booking_no: defaultBookingNo,
     trip_no: voyage.voyage_no || '',
     container_no: '',
     seal_no: '',
@@ -90,14 +84,15 @@ function makeDefaultDraft(voyage: Voyage): DraftRow {
       ? voyage.received_date.slice(0, 10)
       : new Date().toISOString().slice(0, 10),
     cont_type: '20E',
-    unit_price: 0,
-    baf: 0,
-    total_amount: 0,
-    fuel_price_no_vat: 0,
     notes: '',
   };
 }
 
+/**
+ * Supports pasting operational Excel rows:
+ * Format A (with Booking & Seal): SALAN | BOOKING | SO CHUYEN | SO CONT | SEAL | CANG DI | CANG DEN | CHU HANG | NGAY DI | 20E | 20F | 40E | 40F | GHI CHU
+ * Format B (classic): SALAN | SO CHUYEN | SO CONT | CANG DI | CANG DEN | CHU HANG | NGAY DI | 20E | 20F | 40E | 40F | ... | GHI CHU
+ */
 function parseExcelPaste(text: string, fallback: DraftRow): DraftRow[] {
   const lines = text
     .split(/\r?\n/)
@@ -109,8 +104,7 @@ function parseExcelPaste(text: string, fallback: DraftRow): DraftRow[] {
     const cols = line.split('\t').map((c) => c.trim());
     if (cols.length < 2) continue;
 
-    // Skip Excel header rows
-    const joined = cols.slice(0, 4).join(' ').toUpperCase();
+    const joined = cols.slice(0, 5).join(' ').toUpperCase();
     if (
       joined.includes('SÀLAN') ||
       joined.includes('SÀ LAN') ||
@@ -121,42 +115,49 @@ function parseExcelPaste(text: string, fallback: DraftRow): DraftRow[] {
       continue;
     }
 
-    // Standard 16-col Excel layout matching user's template:
-    // 0: SÀLAN, 1: SỐ CHUYẾN, 2: SỐCONT, 3: CẢNG ĐI, 4: CẢNG ĐẾN, 5: CHỦ HÀNG, 6: NGÀY ĐI,
-    // 7: 20E, 8: 20F, 9: 40E, 10: 40F, 11: ĐƠN GIÁ, 12: BAF, 13: THÀNH TIỀN, 14: GIÁ NL K VAT, 15: GHI CHÚ
-    const containerNo = (cols[2] || '').toUpperCase().trim();
+    // Heuristic: if col[3] looks like a container no (4 letters + 7 digits) or col[4] is seal & col[8] is date -> Format A
+    const looksLikeCont = (s?: string) => /^[A-Z]{3,4}[UJZ]?\d{6,7}$/i.test((s || '').trim());
+    const isFormatA = looksLikeCont(cols[3]) || Boolean(parseExcelDate(cols[8]));
+
+    const bargeCode = cols[0] || fallback.barge_code;
+    const bookingNo = isFormatA ? cols[1] || fallback.booking_no : fallback.booking_no;
+    const tripNo = isFormatA ? cols[2] || fallback.trip_no : cols[1] || fallback.trip_no;
+    const containerNo = (isFormatA ? cols[3] : cols[2] || '').toUpperCase().trim();
     if (!containerNo) continue;
 
+    const sealNo = isFormatA ? (cols[4] || '').toUpperCase().trim() : '';
+    const originName = (isFormatA ? cols[5] : cols[3]) || fallback.origin_name;
+    const destName = (isFormatA ? cols[6] : cols[4]) || fallback.destination_name;
+    const shipperName = (isFormatA ? cols[7] : cols[5]) || fallback.shipper_name;
+    const depDate = parseExcelDate(isFormatA ? cols[8] : cols[6]) || fallback.departure_date;
+
+    const typeStart = isFormatA ? 9 : 7;
     let contType: ContType = '20F';
-    if (parseNum(cols[7]) > 0) contType = '20E';
-    else if (parseNum(cols[8]) > 0) contType = '20F';
-    else if (parseNum(cols[9]) > 0) contType = '40E';
-    else if (parseNum(cols[10]) > 0) contType = '40F';
+    if (parseNum(cols[typeStart]) > 0) contType = '20E';
+    else if (parseNum(cols[typeStart + 1]) > 0) contType = '20F';
+    else if (parseNum(cols[typeStart + 2]) > 0) contType = '40E';
+    else if (parseNum(cols[typeStart + 3]) > 0) contType = '40F';
     else {
-      const explicit = cols.slice(7, 11).find((c) => /^(20E|20F|40E|40F)$/i.test(c));
+      const explicit = cols
+        .slice(typeStart, typeStart + 4)
+        .find((c) => /^(20E|20F|40E|40F)$/i.test(c));
       if (explicit) contType = explicit.toUpperCase() as ContType;
     }
 
-    const unitPrice = parseNum(cols[11]);
-    const baf = parseNum(cols[12]);
-    const totalAmount = cols[13] ? parseNum(cols[13]) : unitPrice + baf;
-    const fuelPrice = parseNum(cols[14]);
+    const notes = isFormatA ? cols[13] || '' : cols[15] || cols[11] || '';
 
     parsed.push({
-      barge_code: cols[0] || fallback.barge_code,
-      trip_no: cols[1] || fallback.trip_no,
+      barge_code: bargeCode,
+      booking_no: bookingNo,
+      trip_no: tripNo,
       container_no: containerNo,
-      seal_no: cols[16] || '',
-      origin_name: cols[3] || fallback.origin_name,
-      destination_name: cols[4] || fallback.destination_name,
-      shipper_name: cols[5] || fallback.shipper_name,
-      departure_date: parseExcelDate(cols[6]) || fallback.departure_date,
+      seal_no: sealNo,
+      origin_name: originName,
+      destination_name: destName,
+      shipper_name: shipperName,
+      departure_date: depDate,
       cont_type: contType,
-      unit_price: unitPrice,
-      baf,
-      total_amount: totalAmount,
-      fuel_price_no_vat: fuelPrice,
-      notes: cols[15] || '',
+      notes,
     });
   }
   return parsed;
@@ -171,6 +172,7 @@ export function VoyageContainersPanel({
   onVoyageUpdated,
 }: Props) {
   const [rows, setRows] = useState<VoyageContainer[]>([]);
+  const [voyageBookings, setVoyageBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -187,28 +189,39 @@ export function VoyageContainersPanel({
   const loadContainers = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/dispatch/voyages/${voyage.id}/containers`, {
-        cache: 'no-store',
-      });
-      if (res.ok) {
-        const data: VoyageContainer[] = await res.json();
+      const [cRes, bRes] = await Promise.all([
+        fetch(`${API_URL}/dispatch/voyages/${voyage.id}/containers`, { cache: 'no-store' }),
+        fetch(`${API_URL}/dispatch/bookings`, { cache: 'no-store' }).catch(() => null),
+      ]);
+
+      let defaultBk = '';
+      if (bRes && bRes.ok) {
+        const allBks: Booking[] = await bRes.json();
+        const linked = allBks.filter((b) => b.voyage_id === voyage.id);
+        setVoyageBookings(linked);
+        defaultBk = linked[0]?.booking_no || '';
+      }
+
+      if (cRes.ok) {
+        const data: VoyageContainer[] = await cRes.json();
         setRows(data);
         if (data.length > 0) {
           const last = data[data.length - 1];
           setNewRow((prev) => ({
             ...prev,
             barge_code: last.barge_code || prev.barge_code,
+            booking_no: last.booking_no || defaultBk || prev.booking_no,
             trip_no: last.trip_no || prev.trip_no,
             origin_name: last.origin_name || prev.origin_name,
             destination_name: last.destination_name || prev.destination_name,
             shipper_name: last.shipper_name || prev.shipper_name,
-            departure_date: last.departure_date ? last.departure_date.slice(0, 10) : prev.departure_date,
+            departure_date: last.departure_date
+              ? last.departure_date.slice(0, 10)
+              : prev.departure_date,
             cont_type: last.cont_type || prev.cont_type,
-            unit_price: Number(last.unit_price || 0),
-            baf: Number(last.baf || 0),
-            total_amount: Number(last.unit_price || 0) + Number(last.baf || 0),
-            fuel_price_no_vat: Number(last.fuel_price_no_vat || 0),
           }));
+        } else if (defaultBk) {
+          setNewRow((prev) => ({ ...prev, booking_no: prev.booking_no || defaultBk }));
         }
       }
     } finally {
@@ -222,7 +235,6 @@ export function VoyageContainersPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voyage.id]);
 
-  // Duplicate container check (matches red highlights in Excel template)
   const duplicateSet = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of rows) {
@@ -240,34 +252,16 @@ export function VoyageContainersPanel({
     let c20e = 0,
       c20f = 0,
       c40e = 0,
-      c40f = 0,
-      sumUnit = 0,
-      sumBaf = 0,
-      sumTotal = 0;
+      c40f = 0;
     for (const r of rows) {
       if (r.cont_type === '20E') c20e++;
       else if (r.cont_type === '20F') c20f++;
       else if (r.cont_type === '40E') c40e++;
       else if (r.cont_type === '40F') c40f++;
-      sumUnit += Number(r.unit_price || 0);
-      sumBaf += Number(r.baf || 0);
-      sumTotal += Number(r.total_amount || 0);
     }
     const totalTeus = c20e + c20f + (c40e + c40f) * 2;
-    return { c20e, c20f, c40e, c40f, totalTeus, sumUnit, sumBaf, sumTotal };
+    return { c20e, c20f, c40e, c40f, totalTeus };
   }, [rows]);
-
-  const updateDraftPrice = (
-    setter: React.Dispatch<React.SetStateAction<DraftRow>>,
-    field: 'unit_price' | 'baf',
-    value: number,
-  ) => {
-    setter((prev) => {
-      const next = { ...prev, [field]: value };
-      next.total_amount = Number(next.unit_price || 0) + Number(next.baf || 0);
-      return next;
-    });
-  };
 
   const handleAddRow = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -300,6 +294,7 @@ export function VoyageContainersPanel({
     setEditingId(r.id);
     setEditRow({
       barge_code: r.barge_code || '',
+      booking_no: r.booking_no || '',
       trip_no: r.trip_no || '',
       container_no: r.container_no || '',
       seal_no: r.seal_no || '',
@@ -308,10 +303,6 @@ export function VoyageContainersPanel({
       shipper_name: r.shipper_name || '',
       departure_date: r.departure_date ? r.departure_date.slice(0, 10) : '',
       cont_type: r.cont_type,
-      unit_price: Number(r.unit_price || 0),
-      baf: Number(r.baf || 0),
-      total_amount: Number(r.total_amount || 0),
-      fuel_price_no_vat: Number(r.fuel_price_no_vat || 0),
       notes: r.notes || '',
     });
   };
@@ -319,6 +310,7 @@ export function VoyageContainersPanel({
   const handleSaveEdit = async (containerId: string) => {
     setSaving(true);
     try {
+      // Send only operational fields so Accounting unit_price/BAF remain untouched
       const res = await fetch(`${API_URL}/dispatch/containers/${containerId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -356,8 +348,8 @@ export function VoyageContainersPanel({
   };
 
   const parsedPasteRows = useMemo(
-    () => parseExcelPaste(pasteText, makeDefaultDraft(voyage)),
-    [pasteText, voyage],
+    () => parseExcelPaste(pasteText, makeDefaultDraft(voyage, voyageBookings[0]?.booking_no || '')),
+    [pasteText, voyage, voyageBookings],
   );
 
   const handleImportPaste = async () => {
@@ -388,6 +380,7 @@ export function VoyageContainersPanel({
   const handleExportCsv = () => {
     const header = [
       'SALAN',
+      'SO BOOKING',
       'SO CHUYEN',
       'SO CONT',
       'SO SEAL',
@@ -399,10 +392,6 @@ export function VoyageContainersPanel({
       '20F',
       '40E',
       '40F',
-      'DON GIA',
-      'BAF',
-      'THANH TIEN',
-      'GIA NHIEN LIEU K VAT',
       'GHI CHU',
     ];
     const lines = [
@@ -410,6 +399,7 @@ export function VoyageContainersPanel({
       ...rows.map((r) =>
         [
           r.barge_code || '',
+          r.booking_no || '',
           r.trip_no || '',
           r.container_no,
           r.seal_no || '',
@@ -421,10 +411,6 @@ export function VoyageContainersPanel({
           r.cont_type === '20F' ? 1 : '',
           r.cont_type === '40E' ? 1 : '',
           r.cont_type === '40F' ? 1 : '',
-          r.unit_price || 0,
-          r.baf || 0,
-          r.total_amount || 0,
-          r.fuel_price_no_vat || 0,
           (r.notes || '').replace(/"/g, '""'),
         ]
           .map((v) => `"${v}"`)
@@ -434,7 +420,7 @@ export function VoyageContainersPanel({
     const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `chi-tiet-chuyen-${voyage.voyage_no}.csv`;
+    a.download = `van-hanh-cont-${voyage.voyage_no}.csv`;
     a.click();
   };
 
@@ -452,7 +438,7 @@ export function VoyageContainersPanel({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-bold text-navy-900">
-                Bảng kê Chi tiết Chuyến: {voyage.voyage_no}
+                Bảng Vận hành Container Chuyến: {voyage.voyage_no}
               </h2>
               <span className="px-2 py-0.5 rounded bg-sky-100 text-sky-800 text-xs font-semibold">
                 Sà lan: {voyage.vessel_name || voyage.vessel_code || 'Chưa gán'}
@@ -464,8 +450,8 @@ export function VoyageContainersPanel({
               )}
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Tuyến: {voyage.origin_name || '—'} → {voyage.dest_name || '—'} • Khách hàng chính:{' '}
-              {voyage.customer_name || '—'} • Kế hoạch: {voyage.total_teus || 0} TEUs
+              Tuyến: {voyage.origin_name || '—'} → {voyage.dest_name || '—'} • Kế hoạch:{' '}
+              {voyage.total_teus || 0} TEUs • (Giá cước được quản lý riêng tại mục Quyết toán → Sản lượng)
             </p>
           </div>
         </div>
@@ -493,33 +479,21 @@ export function VoyageContainersPanel({
         </div>
       </div>
 
-      {/* KPI Summary Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+      {/* Operations KPI Summary Strip (No Pricing shown to Dispatchers) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-3">
-          <div className="text-[11px] uppercase text-slate-500 font-medium">Tổng số Cont</div>
-          <div className="text-xl font-bold text-slate-900 mt-0.5">{rows.length}</div>
+          <div className="text-[11px] uppercase text-slate-500 font-medium">Tổng số Cont vận hành</div>
+          <div className="text-xl font-bold text-slate-900 mt-0.5">{rows.length} cont</div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3">
-          <div className="text-[11px] uppercase text-slate-500 font-medium">Cơ cấu Cont</div>
-          <div className="text-xs font-semibold text-slate-800 mt-1">
+          <div className="text-[11px] uppercase text-slate-500 font-medium">Cơ cấu loại Cont</div>
+          <div className="text-sm font-semibold text-slate-800 mt-1">
             20E: {stats.c20e} • 20F: {stats.c20f} • 40E: {stats.c40e} • 40F: {stats.c40f}
           </div>
         </div>
         <div className="bg-rose-50 rounded-xl border border-rose-200 p-3">
           <div className="text-[11px] uppercase text-rose-700 font-medium">Tổng TEUs chi tiết</div>
           <div className="text-xl font-bold text-rose-700 mt-0.5">{stats.totalTeus} TEUs</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-3">
-          <div className="text-[11px] uppercase text-slate-500 font-medium">Tổng Đơn giá</div>
-          <div className="text-base font-bold text-slate-900 mt-1">{formatMoney(stats.sumUnit)} đ</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-3">
-          <div className="text-[11px] uppercase text-slate-500 font-medium">Tổng BAF</div>
-          <div className="text-base font-bold text-slate-900 mt-1">{formatMoney(stats.sumBaf)} đ</div>
-        </div>
-        <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-3">
-          <div className="text-[11px] uppercase text-emerald-700 font-medium">Tổng Thành tiền</div>
-          <div className="text-lg font-bold text-emerald-700 mt-0.5">{formatMoney(stats.sumTotal)} đ</div>
         </div>
       </div>
 
@@ -539,12 +513,17 @@ export function VoyageContainersPanel({
           <option key={v.id} value={v.code} />
         ))}
       </datalist>
+      <datalist id="dl-voyage-bookings">
+        {voyageBookings.map((b) => (
+          <option key={b.id} value={b.booking_no} />
+        ))}
+      </datalist>
 
-      {/* Excel-style Detail Table */}
+      {/* Operations Container Table (No Price Columns, includes SỐ BOOKING after SÀ LAN) */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {duplicateSet.size > 0 && (
           <div className="px-4 py-2 bg-rose-50 border-b border-rose-200 text-xs text-rose-700 font-medium">
-            Cảnh báo: phát hiện {duplicateSet.size} số container bị trùng lặp (được tô đỏ giống file Excel).
+            Cảnh báo: phát hiện {duplicateSet.size} số container bị trùng lặp (được tô đỏ).
           </div>
         )}
 
@@ -557,6 +536,9 @@ export function VoyageContainersPanel({
                 </th>
                 <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300">
                   SÀ LAN
+                </th>
+                <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300 bg-indigo-50/70">
+                  SỐ BOOKING
                 </th>
                 <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300">
                   SỐ CHUYẾN
@@ -582,18 +564,6 @@ export function VoyageContainersPanel({
                 <th colSpan={4} className="px-2 py-1.5 border-r border-b border-slate-300 text-center">
                   LOẠI CONT
                 </th>
-                <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300 text-right">
-                  ĐƠN GIÁ
-                </th>
-                <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300 text-right">
-                  BAF
-                </th>
-                <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300 text-right">
-                  THÀNH TIỀN
-                </th>
-                <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300 text-right">
-                  GIÁ NHIÊN LIỆU K VAT
-                </th>
                 <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300">
                   GHI CHÚ
                 </th>
@@ -610,7 +580,7 @@ export function VoyageContainersPanel({
             </thead>
 
             <tbody className="divide-y divide-slate-200">
-              {/* Quick Add Row (Always visible for fast spreadsheet-like entry) */}
+              {/* Quick Add Row */}
               <tr className="bg-amber-50/70 border-b-2 border-amber-200">
                 <td className="px-2 py-1.5 border-r border-slate-200 text-center text-[11px] font-bold text-amber-700">
                   + Mới
@@ -622,6 +592,15 @@ export function VoyageContainersPanel({
                     value={newRow.barge_code}
                     onChange={(e) => setNewRow({ ...newRow, barge_code: e.target.value })}
                     placeholder="NV36"
+                  />
+                </td>
+                <td className="px-1 py-1.5 border-r border-slate-200">
+                  <input
+                    list="dl-voyage-bookings"
+                    className="w-28 border border-indigo-300 rounded px-1.5 py-1 bg-white text-xs font-semibold uppercase"
+                    value={newRow.booking_no}
+                    onChange={(e) => setNewRow({ ...newRow, booking_no: e.target.value.toUpperCase() })}
+                    placeholder="BK-..."
                   />
                 </td>
                 <td className="px-1 py-1.5 border-r border-slate-200">
@@ -706,44 +685,7 @@ export function VoyageContainersPanel({
                 ))}
                 <td className="px-1 py-1.5 border-r border-slate-200">
                   <input
-                    type="number"
-                    className="w-24 border border-slate-300 rounded px-1.5 py-1 bg-white text-xs text-right"
-                    value={newRow.unit_price || ''}
-                    onChange={(e) => updateDraftPrice(setNewRow, 'unit_price', Number(e.target.value))}
-                    placeholder="638182"
-                  />
-                </td>
-                <td className="px-1 py-1.5 border-r border-slate-200">
-                  <input
-                    type="number"
-                    className="w-24 border border-slate-300 rounded px-1.5 py-1 bg-white text-xs text-right"
-                    value={newRow.baf || ''}
-                    onChange={(e) => updateDraftPrice(setNewRow, 'baf', Number(e.target.value))}
-                    placeholder="129600"
-                  />
-                </td>
-                <td className="px-1 py-1.5 border-r border-slate-200">
-                  <input
-                    type="number"
-                    className="w-24 border border-slate-300 rounded px-1.5 py-1 bg-emerald-50 font-semibold text-xs text-right"
-                    value={newRow.total_amount || ''}
-                    onChange={(e) => setNewRow({ ...newRow, total_amount: Number(e.target.value) })}
-                  />
-                </td>
-                <td className="px-1 py-1.5 border-r border-slate-200">
-                  <input
-                    type="number"
-                    className="w-24 border border-slate-300 rounded px-1.5 py-1 bg-white text-xs text-right"
-                    value={newRow.fuel_price_no_vat || ''}
-                    onChange={(e) =>
-                      setNewRow({ ...newRow, fuel_price_no_vat: Number(e.target.value) })
-                    }
-                    placeholder="28800"
-                  />
-                </td>
-                <td className="px-1 py-1.5 border-r border-slate-200">
-                  <input
-                    className="w-28 border border-slate-300 rounded px-1.5 py-1 bg-white text-xs"
+                    className="w-32 border border-slate-300 rounded px-1.5 py-1 bg-white text-xs"
                     value={newRow.notes}
                     onChange={(e) => setNewRow({ ...newRow, notes: e.target.value })}
                     onKeyDown={(e) => {
@@ -770,14 +712,14 @@ export function VoyageContainersPanel({
               {/* Existing Rows */}
               {loading ? (
                 <tr>
-                  <td colSpan={18} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={16} className="px-4 py-8 text-center text-slate-400">
                     Đang tải danh sách chi tiết container...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={18} className="px-4 py-8 text-center text-slate-500">
-                    Chuyến này chưa có dữ liệu chi tiết container. Bạn hãy nhập trực tiếp ở dòng màu vàng phía trên hoặc bấm <strong>Dán hàng loạt từ Excel</strong>.
+                  <td colSpan={16} className="px-4 py-8 text-center text-slate-500">
+                    Chuyến này chưa có danh sách container vận hành. Bạn hãy nhập trực tiếp ở dòng màu vàng phía trên hoặc bấm <strong>Dán hàng loạt từ Excel</strong>.
                   </td>
                 </tr>
               ) : (
@@ -797,6 +739,16 @@ export function VoyageContainersPanel({
                             className="w-20 border rounded px-1.5 py-1 bg-white text-xs"
                             value={editRow.barge_code}
                             onChange={(e) => setEditRow({ ...editRow, barge_code: e.target.value })}
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200">
+                          <input
+                            list="dl-voyage-bookings"
+                            className="w-28 border rounded px-1.5 py-1 bg-white text-xs font-semibold uppercase"
+                            value={editRow.booking_no}
+                            onChange={(e) =>
+                              setEditRow({ ...editRow, booking_no: e.target.value.toUpperCase() })
+                            }
                           />
                         </td>
                         <td className="px-1 py-1.5 border-r border-slate-200">
@@ -873,43 +825,7 @@ export function VoyageContainersPanel({
                         ))}
                         <td className="px-1 py-1.5 border-r border-slate-200">
                           <input
-                            type="number"
-                            className="w-24 border rounded px-1.5 py-1 bg-white text-xs text-right"
-                            value={editRow.unit_price}
-                            onChange={(e) => updateDraftPrice(setEditRow, 'unit_price', Number(e.target.value))}
-                          />
-                        </td>
-                        <td className="px-1 py-1.5 border-r border-slate-200">
-                          <input
-                            type="number"
-                            className="w-24 border rounded px-1.5 py-1 bg-white text-xs text-right"
-                            value={editRow.baf}
-                            onChange={(e) => updateDraftPrice(setEditRow, 'baf', Number(e.target.value))}
-                          />
-                        </td>
-                        <td className="px-1 py-1.5 border-r border-slate-200">
-                          <input
-                            type="number"
-                            className="w-24 border rounded px-1.5 py-1 bg-emerald-50 font-semibold text-xs text-right"
-                            value={editRow.total_amount}
-                            onChange={(e) =>
-                              setEditRow({ ...editRow, total_amount: Number(e.target.value) })
-                            }
-                          />
-                        </td>
-                        <td className="px-1 py-1.5 border-r border-slate-200">
-                          <input
-                            type="number"
-                            className="w-24 border rounded px-1.5 py-1 bg-white text-xs text-right"
-                            value={editRow.fuel_price_no_vat}
-                            onChange={(e) =>
-                              setEditRow({ ...editRow, fuel_price_no_vat: Number(e.target.value) })
-                            }
-                          />
-                        </td>
-                        <td className="px-1 py-1.5 border-r border-slate-200">
-                          <input
-                            className="w-28 border rounded px-1.5 py-1 bg-white text-xs"
+                            className="w-32 border rounded px-1.5 py-1 bg-white text-xs"
                             value={editRow.notes}
                             onChange={(e) => setEditRow({ ...editRow, notes: e.target.value })}
                           />
@@ -940,6 +856,9 @@ export function VoyageContainersPanel({
                       </td>
                       <td className="px-2.5 py-2 border-r border-slate-200 font-medium">
                         {r.barge_code || '—'}
+                      </td>
+                      <td className="px-2.5 py-2 border-r border-slate-200 font-semibold text-indigo-700">
+                        {r.booking_no || '—'}
                       </td>
                       <td className="px-2.5 py-2 border-r border-slate-200">{r.trip_no || '—'}</td>
                       <td
@@ -972,19 +891,7 @@ export function VoyageContainersPanel({
                           {r.cont_type === ct ? '1' : ''}
                         </td>
                       ))}
-                      <td className="px-2.5 py-2 border-r border-slate-200 text-right tabular-nums">
-                        {formatMoney(r.unit_price)}
-                      </td>
-                      <td className="px-2.5 py-2 border-r border-slate-200 text-right tabular-nums">
-                        {formatMoney(r.baf)}
-                      </td>
-                      <td className="px-2.5 py-2 border-r border-slate-200 text-right font-semibold text-emerald-700 tabular-nums">
-                        {formatMoney(r.total_amount)}
-                      </td>
-                      <td className="px-2.5 py-2 border-r border-slate-200 text-right tabular-nums text-slate-600">
-                        {formatMoney(r.fuel_price_no_vat)}
-                      </td>
-                      <td className="px-2.5 py-2 border-r border-slate-200 text-slate-500 max-w-[180px] truncate">
+                      <td className="px-2.5 py-2 border-r border-slate-200 text-slate-500 max-w-[200px] truncate">
                         {r.notes || ''}
                       </td>
                       <td className="px-2.5 py-2 text-right space-x-1">
@@ -1010,23 +917,14 @@ export function VoyageContainersPanel({
             {rows.length > 0 && (
               <tfoot className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
                 <tr>
-                  <td colSpan={9} className="px-3 py-2.5 text-right border-r border-slate-300">
+                  <td colSpan={10} className="px-3 py-2.5 text-right border-r border-slate-300">
                     TỔNG CỘNG ({rows.length} cont / {stats.totalTeus} TEUs):
                   </td>
                   <td className="px-2 py-2.5 text-center border-r border-slate-300">{stats.c20e}</td>
                   <td className="px-2 py-2.5 text-center border-r border-slate-300">{stats.c20f}</td>
                   <td className="px-2 py-2.5 text-center border-r border-slate-300">{stats.c40e}</td>
                   <td className="px-2 py-2.5 text-center border-r border-slate-300">{stats.c40f}</td>
-                  <td className="px-2.5 py-2.5 text-right border-r border-slate-300 tabular-nums">
-                    {formatMoney(stats.sumUnit)}
-                  </td>
-                  <td className="px-2.5 py-2.5 text-right border-r border-slate-300 tabular-nums">
-                    {formatMoney(stats.sumBaf)}
-                  </td>
-                  <td className="px-2.5 py-2.5 text-right border-r border-slate-300 text-emerald-700 tabular-nums">
-                    {formatMoney(stats.sumTotal)}
-                  </td>
-                  <td colSpan={3} className="px-3 py-2.5"></td>
+                  <td colSpan={2} className="px-3 py-2.5"></td>
                 </tr>
               </tfoot>
             )}
@@ -1041,10 +939,10 @@ export function VoyageContainersPanel({
             <div className="flex items-center justify-between border-b pb-3">
               <div>
                 <h3 className="font-bold text-lg text-slate-900">
-                  Dán dữ liệu chi tiết trực tiếp từ Excel
+                  Dán dữ liệu vận hành Container từ Excel
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Copy các dòng trong file Excel theo đúng thứ tự 16 cột mẫu: SÀ LAN | SỐ CHUYẾN | SỐ CONT | CẢNG ĐI | CẢNG ĐẾN | CHỦ HÀNG | NGÀY ĐI | 20E | 20F | 40E | 40F | ĐƠN GIÁ | BAF | THÀNH TIỀN | GIÁ NL K VAT | GHI CHÚ
+                  Hỗ trợ copy từ bảng Excel vận hành: SÀ LAN | SỐ BOOKING | SỐ CHUYẾN | SỐ CONT | SỐ SEAL | CẢNG ĐI | CẢNG ĐẾN | CHỦ HÀNG | NGÀY ĐI | 20E | 20F | 40E | 40F | GHI CHÚ (hoặc mẫu cũ không có Booking/Seal).
                 </p>
               </div>
               <button
@@ -1058,7 +956,7 @@ export function VoyageContainersPanel({
             <textarea
               rows={8}
               className="w-full border border-slate-300 rounded-lg p-3 font-mono text-xs"
-              placeholder={'NV36\tV.36-04926W\tMSMU1758748\tSPITC\tTrà Nóc\tPhước Tạo\t10/21/2026\t1\t\t\t\t638,182\t129,600\t767,782\t28,800\t'}
+              placeholder={'NV36\tBK-26-4302\tV.36-04926W\tMSMU1758748\tSL9921\tSPITC\tTrà Nóc\tPhước Tạo\t10/21/2026\t1\t\t\t\t'}
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
             />
@@ -1084,36 +982,30 @@ export function VoyageContainersPanel({
                   <thead className="bg-slate-100 font-semibold border-b">
                     <tr>
                       <th className="px-2 py-1.5">Sà lan</th>
+                      <th className="px-2 py-1.5">Booking</th>
                       <th className="px-2 py-1.5">Số chuyến</th>
                       <th className="px-2 py-1.5">Số Cont</th>
+                      <th className="px-2 py-1.5">Số Seal</th>
                       <th className="px-2 py-1.5">Cảng đi → Đến</th>
                       <th className="px-2 py-1.5">Chủ hàng</th>
                       <th className="px-2 py-1.5">Ngày đi</th>
                       <th className="px-2 py-1.5 text-center">Loại</th>
-                      <th className="px-2 py-1.5 text-right">Đơn giá</th>
-                      <th className="px-2 py-1.5 text-right">BAF</th>
-                      <th className="px-2 py-1.5 text-right">Thành tiền</th>
-                      <th className="px-2 py-1.5 text-right">NL K VAT</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {parsedPasteRows.slice(0, 15).map((r, i) => (
                       <tr key={i}>
                         <td className="px-2 py-1">{r.barge_code}</td>
+                        <td className="px-2 py-1 font-semibold text-indigo-700">{r.booking_no}</td>
                         <td className="px-2 py-1">{r.trip_no}</td>
                         <td className="px-2 py-1 font-mono font-semibold">{r.container_no}</td>
+                        <td className="px-2 py-1 font-mono">{r.seal_no}</td>
                         <td className="px-2 py-1">
                           {r.origin_name} → {r.destination_name}
                         </td>
                         <td className="px-2 py-1">{r.shipper_name}</td>
                         <td className="px-2 py-1">{r.departure_date}</td>
                         <td className="px-2 py-1 text-center font-bold">{r.cont_type}</td>
-                        <td className="px-2 py-1 text-right">{formatMoney(r.unit_price)}</td>
-                        <td className="px-2 py-1 text-right">{formatMoney(r.baf)}</td>
-                        <td className="px-2 py-1 text-right font-semibold text-emerald-700">
-                          {formatMoney(r.total_amount)}
-                        </td>
-                        <td className="px-2 py-1 text-right">{formatMoney(r.fuel_price_no_vat)}</td>
                       </tr>
                     ))}
                   </tbody>

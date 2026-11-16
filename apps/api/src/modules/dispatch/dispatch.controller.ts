@@ -82,6 +82,12 @@ export class DispatchController {
     return this.dispatchService.syncVoyageCountsFromDetails(id);
   }
 
+  @Get('containers')
+  @ApiOperation({ summary: 'Báo cáo sản lượng toàn bộ container (Kế toán & Quyết toán)' })
+  listAllContainers() {
+    return this.dispatchService.listAllContainers();
+  }
+
   @Patch('containers/:containerId')
   @ApiOperation({ summary: 'Cập nhật 1 dòng container chi tiết' })
   updateVoyageContainer(@Param('containerId') containerId: string, @Body() body: any) {
