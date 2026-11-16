@@ -278,6 +278,18 @@ export class DispatchService implements OnModuleInit {
     return Number(c20e || 0) + Number(c20f || 0) + (Number(c40e || 0) + Number(c40f || 0)) * 2;
   }
 
+  private toIsoDateOnly(value: unknown): string | null {
+    if (!value) return null;
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+    }
+    const str = String(value).trim();
+    if (!str) return null;
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+    const parsed = new Date(str);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+  }
+
   async createVoyage(dto: {
     voyage_no: string;
     vessel_id: string;
@@ -977,7 +989,8 @@ export class DispatchService implements OnModuleInit {
       const maxDeadline = selected
         .map((b) => b.closing_time)
         .filter(Boolean)
-        .sort()[0];
+        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
+      const orderDeadline = this.toIsoDateOnly(maxDeadline);
 
       let targetVoyageId = dto.voyage_id || null;
       let existingTeus = 0;
@@ -1040,7 +1053,7 @@ export class DispatchService implements OnModuleInit {
             sum40e,
             sum40f,
             sumTeus,
-            maxDeadline ? String(maxDeadline).slice(0, 10) : null,
+            orderDeadline,
           ],
         );
         targetVoyageId = vyRes.rows[0].id;
