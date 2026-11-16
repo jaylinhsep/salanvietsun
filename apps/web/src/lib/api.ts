@@ -133,6 +133,7 @@ export interface CaptainReportEntry {
 export interface Booking {
   id: string;
   booking_no: string;
+  cargo_direction?: 'EXPORT' | 'IMPORT';
   customer_id?: string;
   customer_name?: string;
   resolved_customer_name?: string;

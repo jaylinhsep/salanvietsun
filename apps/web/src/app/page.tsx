@@ -12,6 +12,7 @@ import {
   ListChecks,
   MapPin,
   PackagePlus,
+  Pencil,
   Plus,
   Ship,
   Smartphone,
@@ -27,9 +28,16 @@ import {
   deleteBookingAction,
   getClosingUrgency,
   loadWorkflowSnapshot,
+  updateBookingAction,
 } from '@/lib/workflow-store';
 import { MapView } from '@/components/MapView';
 import { StatusBadge } from '@/components/StatusBadge';
+
+function toLocalDateTimeInput(iso?: string): string {
+  const d = iso ? new Date(iso) : new Date(Date.now() + 8 * 3600 * 1000);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
 
 export default function DispatchCenterHomePage() {
   const [vessels, setVessels] = useState<Vessel[]>([]);
@@ -44,10 +52,12 @@ export default function DispatchCenterHomePage() {
   const [mapVesselId, setMapVesselId] = useState<string | null>(null);
   const [onlyUrgent, setOnlyUrgent] = useState(false);
 
-  // Quick Create Booking Modal
+  // Quick Create / Edit Booking Modal
   const [showCreateBooking, setShowCreateBooking] = useState(false);
+  const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
   const [bookingForm, setBookingForm] = useState({
     booking_no: '',
+    cargo_direction: 'EXPORT' as 'EXPORT' | 'IMPORT',
     customer_id: '',
     customer_name: '',
     origin_port_id: '',
@@ -58,7 +68,7 @@ export default function DispatchCenterHomePage() {
     cont_20f: 4,
     cont_40e: 0,
     cont_40f: 2,
-    closing_time: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 16),
+    closing_time: toLocalDateTimeInput(),
     estimated_freight: 12000000,
     notes: '',
   });
@@ -128,8 +138,10 @@ export default function DispatchCenterHomePage() {
   const selectedTeus = selectedBookings.reduce((s, b) => s + Number(b.total_teus || 0), 0);
 
   const handleOpenBookingModal = () => {
+    setEditingBookingId(null);
     setBookingForm({
       booking_no: `BK-${new Date().getFullYear().toString().slice(-2)}-${Math.floor(1000 + Math.random() * 9000)}`,
+      cargo_direction: 'EXPORT',
       customer_id: customers[0]?.id || '',
       customer_name: customers[0]?.name || '',
       origin_port_id: ports[0]?.id || '',
@@ -140,9 +152,41 @@ export default function DispatchCenterHomePage() {
       cont_20f: 4,
       cont_40e: 0,
       cont_40f: 2,
-      closing_time: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 16),
+      closing_time: toLocalDateTimeInput(),
       estimated_freight: 12000000,
       notes: '',
+    });
+    setShowCreateBooking(true);
+  };
+
+  const handleOpenEditBookingModal = (bk: Booking) => {
+    setEditingBookingId(bk.id);
+    const matchedCust =
+      customers.find((c) => c.id === bk.customer_id) ||
+      customers.find((c) => c.name === (bk.resolved_customer_name || bk.customer_name));
+    const matchedOrigin =
+      ports.find((p) => p.id === bk.origin_port_id) ||
+      ports.find((p) => p.name === (bk.resolved_origin_name || bk.origin_name));
+    const matchedDest =
+      ports.find((p) => p.id === bk.destination_port_id) ||
+      ports.find((p) => p.name === (bk.resolved_dest_name || bk.dest_name));
+
+    setBookingForm({
+      booking_no: bk.booking_no,
+      cargo_direction: bk.cargo_direction === 'IMPORT' ? 'IMPORT' : 'EXPORT',
+      customer_id: matchedCust?.id || bk.customer_id || customers[0]?.id || '',
+      customer_name: bk.resolved_customer_name || bk.customer_name || '',
+      origin_port_id: matchedOrigin?.id || bk.origin_port_id || ports[0]?.id || '',
+      origin_name: bk.resolved_origin_name || bk.origin_name || '',
+      destination_port_id: matchedDest?.id || bk.destination_port_id || ports[1]?.id || '',
+      dest_name: bk.resolved_dest_name || bk.dest_name || '',
+      cont_20e: Number(bk.cont_20e || 0),
+      cont_20f: Number(bk.cont_20f || 0),
+      cont_40e: Number(bk.cont_40e || 0),
+      cont_40f: Number(bk.cont_40f || 0),
+      closing_time: toLocalDateTimeInput(bk.closing_time),
+      estimated_freight: Number(bk.estimated_freight || 0),
+      notes: bk.notes || '',
     });
     setShowCreateBooking(true);
   };
@@ -152,8 +196,9 @@ export default function DispatchCenterHomePage() {
     const cust = customers.find((c) => c.id === bookingForm.customer_id);
     const op = ports.find((p) => p.id === bookingForm.origin_port_id);
     const dp = ports.find((p) => p.id === bookingForm.destination_port_id);
-    await createBookingAction({
+    const payload = {
       booking_no: bookingForm.booking_no,
+      cargo_direction: bookingForm.cargo_direction,
       customer_id: bookingForm.customer_id || undefined,
       customer_name: cust?.name || bookingForm.customer_name,
       origin_port_id: bookingForm.origin_port_id || undefined,
@@ -169,8 +214,15 @@ export default function DispatchCenterHomePage() {
         : undefined,
       estimated_freight: Number(bookingForm.estimated_freight || 0),
       notes: bookingForm.notes,
-    });
+    };
+
+    if (editingBookingId) {
+      await updateBookingAction(editingBookingId, payload);
+    } else {
+      await createBookingAction(payload);
+    }
     setShowCreateBooking(false);
+    setEditingBookingId(null);
     await refresh();
   };
 
@@ -288,7 +340,7 @@ export default function DispatchCenterHomePage() {
             />
             <div>
               <div className="text-[11px] uppercase font-semibold opacity-80">
-                Đơn sát giờ cắt máng (&lt;12h)
+                Đơn sát cắt máng / hạn lệnh (&lt;12h)
               </div>
               <div className="text-lg font-bold">{urgentCount} Booking</div>
             </div>
@@ -393,16 +445,25 @@ export default function DispatchCenterHomePage() {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         {checked ? (
                           <CheckSquare className="w-4 h-4 text-indigo-600 flex-shrink-0" />
                         ) : (
                           <Square className="w-4 h-4 text-slate-400 flex-shrink-0" />
                         )}
                         <span className="font-bold text-sm text-navy-900">{bk.booking_no}</span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            bk.cargo_direction === 'IMPORT'
+                              ? 'bg-violet-100 text-violet-800'
+                              : 'bg-sky-100 text-sky-800'
+                          }`}
+                        >
+                          {bk.cargo_direction === 'IMPORT' ? 'Hàng Nhập' : 'Hàng Xuất'}
+                        </span>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1">
                         <span
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
                             isHot
@@ -411,9 +472,27 @@ export default function DispatchCenterHomePage() {
                                 ? 'bg-amber-100 text-amber-800'
                                 : 'bg-slate-100 text-slate-600'
                           }`}
+                          title={
+                            bk.cargo_direction === 'IMPORT'
+                              ? 'Thời gian hết hạn lệnh'
+                              : 'Giờ cắt máng (Closing Time)'
+                          }
                         >
-                          <Clock className="w-3 h-3" /> {urgency.label}
+                          <Clock className="w-3 h-3" />{' '}
+                          {bk.cargo_direction === 'IMPORT' ? 'Hạn lệnh:' : 'Cắt máng:'}{' '}
+                          {urgency.label}
                         </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditBookingModal(bk);
+                          }}
+                          className="p-1 text-slate-400 hover:text-maritime-600"
+                          title="Sửa booking"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -646,7 +725,7 @@ export default function DispatchCenterHomePage() {
         )}
       </div>
 
-      {/* Quick Create Booking Modal */}
+      {/* Quick Create / Edit Booking Modal */}
       {showCreateBooking && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <form
@@ -654,13 +733,44 @@ export default function DispatchCenterHomePage() {
             className="bg-white rounded-xl max-w-lg w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto"
           >
             <div className="flex items-center justify-between border-b pb-2.5">
-              <h3 className="font-bold text-lg text-slate-900">Tiếp nhận Booking mới (Bước 1)</h3>
+              <h3 className="font-bold text-lg text-slate-900">
+                {editingBookingId ? 'Chỉnh sửa Booking' : 'Tiếp nhận Booking mới (Bước 1)'}
+              </h3>
               <button
                 type="button"
-                onClick={() => setShowCreateBooking(false)}
+                onClick={() => {
+                  setShowCreateBooking(false);
+                  setEditingBookingId(null);
+                }}
                 className="p-1 rounded hover:bg-slate-100"
               >
                 <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Export vs Import Toggle */}
+            <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl text-sm">
+              <button
+                type="button"
+                onClick={() => setBookingForm({ ...bookingForm, cargo_direction: 'EXPORT' })}
+                className={`py-2 rounded-lg font-semibold transition-colors ${
+                  bookingForm.cargo_direction === 'EXPORT'
+                    ? 'bg-sky-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Hàng Xuất (Cắt máng)
+              </button>
+              <button
+                type="button"
+                onClick={() => setBookingForm({ ...bookingForm, cargo_direction: 'IMPORT' })}
+                className={`py-2 rounded-lg font-semibold transition-colors ${
+                  bookingForm.cargo_direction === 'IMPORT'
+                    ? 'bg-violet-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Hàng Nhập (Hạn lệnh)
               </button>
             </div>
 
@@ -676,7 +786,9 @@ export default function DispatchCenterHomePage() {
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-600">
-                  Giờ cắt máng (Closing Time)
+                  {bookingForm.cargo_direction === 'IMPORT'
+                    ? 'Thời gian hết hạn lệnh'
+                    : 'Giờ cắt máng (Closing Time)'}
                 </label>
                 <input
                   type="datetime-local"
@@ -795,7 +907,10 @@ export default function DispatchCenterHomePage() {
             <div className="flex justify-end gap-2 pt-2 border-t">
               <button
                 type="button"
-                onClick={() => setShowCreateBooking(false)}
+                onClick={() => {
+                  setShowCreateBooking(false);
+                  setEditingBookingId(null);
+                }}
                 className="px-4 py-2 rounded-lg border text-sm"
               >
                 Hủy
@@ -804,7 +919,7 @@ export default function DispatchCenterHomePage() {
                 type="submit"
                 className="px-4 py-2 rounded-lg bg-maritime-600 text-white text-sm font-medium hover:bg-maritime-500"
               >
-                Lưu Booking vào hàng chờ
+                {editingBookingId ? 'Lưu thay đổi Booking' : 'Lưu Booking vào hàng chờ'}
               </button>
             </div>
           </form>

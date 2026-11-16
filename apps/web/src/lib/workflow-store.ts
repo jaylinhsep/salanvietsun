@@ -307,6 +307,7 @@ export async function createBookingAction(dto: Partial<Booking>): Promise<Bookin
   const created: Booking = {
     id: `bk-local-${Date.now()}`,
     booking_no: (dto.booking_no || `BK-${Date.now().toString().slice(-5)}`).toUpperCase(),
+    cargo_direction: dto.cargo_direction === 'IMPORT' ? 'IMPORT' : 'EXPORT',
     customer_id: dto.customer_id,
     customer_name: dto.customer_name || 'Khách hàng',
     origin_port_id: dto.origin_port_id,
@@ -328,6 +329,55 @@ export async function createBookingAction(dto: Partial<Booking>): Promise<Bookin
   const current = seedLocalBookingsIfEmpty();
   writeJson(LOCAL_BOOKINGS_KEY, [created, ...current]);
   return created;
+}
+
+export async function updateBookingAction(
+  id: string,
+  dto: Partial<Booking>,
+): Promise<Booking> {
+  const c20e = Number(dto.cont_20e || 0);
+  const c20f = Number(dto.cont_20f || 0);
+  const c40e = Number(dto.cont_40e || 0);
+  const c40f = Number(dto.cont_40f || 0);
+  const total_teus = c20e + c20f + (c40e + c40f) * 2;
+
+  try {
+    const res = await fetch(`${API_URL}/dispatch/bookings/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dto),
+    });
+    if (res.ok) return (await res.json()) as Booking;
+  } catch {
+    // Fallback to local store
+  }
+
+  let updatedRow: Booking | null = null;
+  const updatedList = seedLocalBookingsIfEmpty().map((b) => {
+    if (b.id !== id) return b;
+    updatedRow = {
+      ...b,
+      booking_no: (dto.booking_no || b.booking_no).toUpperCase(),
+      cargo_direction: dto.cargo_direction === 'IMPORT' ? 'IMPORT' : 'EXPORT',
+      customer_id: dto.customer_id,
+      customer_name: dto.customer_name ?? b.customer_name,
+      origin_port_id: dto.origin_port_id,
+      origin_name: dto.origin_name ?? b.origin_name,
+      destination_port_id: dto.destination_port_id,
+      dest_name: dto.dest_name ?? b.dest_name,
+      cont_20e: c20e,
+      cont_20f: c20f,
+      cont_40e: c40e,
+      cont_40f: c40f,
+      total_teus,
+      closing_time: dto.closing_time,
+      estimated_freight: Number(dto.estimated_freight ?? b.estimated_freight ?? 0),
+      notes: dto.notes ?? b.notes,
+    };
+    return updatedRow;
+  });
+  writeJson(LOCAL_BOOKINGS_KEY, updatedList);
+  return updatedRow || ({ id, ...dto } as Booking);
 }
 
 export async function deleteBookingAction(id: string): Promise<void> {

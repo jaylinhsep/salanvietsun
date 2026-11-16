@@ -68,6 +68,7 @@ export class DispatchService implements OnModuleInit {
         );
         CREATE INDEX IF NOT EXISTS idx_bookings_voyage_id ON bookings(voyage_id);
         CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
+        ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cargo_direction VARCHAR(20) NOT NULL DEFAULT 'EXPORT';
 
         ALTER TABLE voyage_containers ADD COLUMN IF NOT EXISTS seal_no VARCHAR(60);
         ALTER TABLE voyage_containers ADD COLUMN IF NOT EXISTS booking_no VARCHAR(80);
@@ -674,39 +675,110 @@ export class DispatchService implements OnModuleInit {
     return res.rows;
   }
 
-  async createBooking(dto: any) {
+  private normalizeBookingFields(dto: any) {
     const c20e = Number(dto.cont_20e || 0);
     const c20f = Number(dto.cont_20f || 0);
     const c40e = Number(dto.cont_40e || 0);
     const c40f = Number(dto.cont_40f || 0);
-    const totalTeus = this.computeTeus(c20e, c20f, c40e, c40f);
+    const dir = String(dto.cargo_direction || 'EXPORT').toUpperCase() === 'IMPORT' ? 'IMPORT' : 'EXPORT';
+    return {
+      booking_no: String(dto.booking_no || `BK-${Date.now().toString().slice(-6)}`).trim().toUpperCase(),
+      cargo_direction: dir,
+      customer_id: dto.customer_id || null,
+      customer_name: dto.customer_name || null,
+      origin_port_id: dto.origin_port_id || null,
+      origin_name: dto.origin_name || null,
+      destination_port_id: dto.destination_port_id || null,
+      dest_name: dto.dest_name || null,
+      c20e,
+      c20f,
+      c40e,
+      c40f,
+      totalTeus: this.computeTeus(c20e, c20f, c40e, c40f),
+      closing_time: dto.closing_time || null,
+      estimated_freight: Number(dto.estimated_freight || 0),
+      notes: dto.notes || null,
+    };
+  }
 
+  async createBooking(dto: any) {
+    const b = this.normalizeBookingFields(dto);
     const res = await this.db.query(
       `
       INSERT INTO bookings (
-        booking_no, customer_id, customer_name,
+        booking_no, cargo_direction, customer_id, customer_name,
         origin_port_id, origin_name, destination_port_id, dest_name,
         cont_20e, cont_20f, cont_40e, cont_40f, total_teus,
         closing_time, estimated_freight, notes, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'PENDING')
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'PENDING')
       RETURNING *
       `,
       [
-        String(dto.booking_no || `BK-${Date.now().toString().slice(-6)}`).trim().toUpperCase(),
-        dto.customer_id || null,
-        dto.customer_name || null,
-        dto.origin_port_id || null,
-        dto.origin_name || null,
-        dto.destination_port_id || null,
-        dto.dest_name || null,
-        c20e,
-        c20f,
-        c40e,
-        c40f,
-        totalTeus,
-        dto.closing_time || null,
-        Number(dto.estimated_freight || 0),
-        dto.notes || null,
+        b.booking_no,
+        b.cargo_direction,
+        b.customer_id,
+        b.customer_name,
+        b.origin_port_id,
+        b.origin_name,
+        b.destination_port_id,
+        b.dest_name,
+        b.c20e,
+        b.c20f,
+        b.c40e,
+        b.c40f,
+        b.totalTeus,
+        b.closing_time,
+        b.estimated_freight,
+        b.notes,
+      ],
+    );
+    return res.rows[0];
+  }
+
+  async updateBooking(id: string, dto: any) {
+    const b = this.normalizeBookingFields(dto);
+    const res = await this.db.query(
+      `
+      UPDATE bookings
+      SET
+        booking_no = $2,
+        cargo_direction = $3,
+        customer_id = $4,
+        customer_name = $5,
+        origin_port_id = $6,
+        origin_name = $7,
+        destination_port_id = $8,
+        dest_name = $9,
+        cont_20e = $10,
+        cont_20f = $11,
+        cont_40e = $12,
+        cont_40f = $13,
+        total_teus = $14,
+        closing_time = $15,
+        estimated_freight = $16,
+        notes = $17,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+      `,
+      [
+        id,
+        b.booking_no,
+        b.cargo_direction,
+        b.customer_id,
+        b.customer_name,
+        b.origin_port_id,
+        b.origin_name,
+        b.destination_port_id,
+        b.dest_name,
+        b.c20e,
+        b.c20f,
+        b.c40e,
+        b.c40f,
+        b.totalTeus,
+        b.closing_time,
+        b.estimated_freight,
+        b.notes,
       ],
     );
     return res.rows[0];

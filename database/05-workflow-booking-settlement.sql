@@ -3,6 +3,7 @@
 CREATE TABLE IF NOT EXISTS bookings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   booking_no VARCHAR(80) NOT NULL,
+  cargo_direction VARCHAR(20) NOT NULL DEFAULT 'EXPORT',
   customer_id UUID REFERENCES customers(id),
   customer_name VARCHAR(150),
   origin_port_id UUID REFERENCES ports(id),

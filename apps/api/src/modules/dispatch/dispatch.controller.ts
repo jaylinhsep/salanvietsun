@@ -106,6 +106,12 @@ export class DispatchController {
     return this.dispatchService.createBooking(body);
   }
 
+  @Patch('bookings/:id')
+  @ApiOperation({ summary: 'Chỉnh sửa Booking (Hàng xuất/nhập, SL cont, giờ cắt máng/hạn lệnh)' })
+  updateBooking(@Param('id') id: string, @Body() body: any) {
+    return this.dispatchService.updateBooking(id, body);
+  }
+
   @Delete('bookings/:id')
   @ApiOperation({ summary: 'Xóa Booking' })
   deleteBooking(@Param('id') id: string) {
