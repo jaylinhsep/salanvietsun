@@ -15,11 +15,11 @@ import {
 } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Tổng quan', icon: LayoutDashboard },
-  { href: '/fleet', label: 'Đội tàu & Thiết bị', icon: Ship },
-  { href: '/dispatch', label: 'Điều độ & Chuyến', icon: Compass },
-  { href: '/tracking', label: 'Hành trình AIS & Dầu', icon: Fuel },
-  { href: '/orders', label: 'Đơn hàng & Công nợ', icon: FileSpreadsheet },
+  { href: '/', label: '1. Bảng Điều độ 1 Chạm', icon: LayoutDashboard },
+  { href: '/dispatch', label: '2. Chi tiết Cont & Danh mục', icon: Compass },
+  { href: '/orders', label: '3. Quyết toán & Công nợ', icon: FileSpreadsheet },
+  { href: '/fleet', label: 'Đội sà lan & Thiết bị', icon: Ship },
+  { href: '/tracking', label: 'Bản đồ AIS & Dầu', icon: Fuel },
   { href: '/maintenance', label: 'Bảo trì & Sửa chữa', icon: Wrench },
 ];
 

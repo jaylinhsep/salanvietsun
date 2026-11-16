@@ -33,7 +33,7 @@ export class MobileService {
       LEFT JOIN ports op ON op.id = vy.origin_port_id
       LEFT JOIN ports dp ON dp.id = vy.destination_port_id
       LEFT JOIN orders o ON o.id = vy.order_id
-      WHERE vy.vessel_id = $1 AND vy.status IN ('PLANNED', 'DEPARTED', 'IN_TRANSIT')
+      WHERE vy.vessel_id = $1 AND vy.status IN ('PLANNED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED')
       ORDER BY vy.created_at DESC
       LIMIT 1
       `,
@@ -85,5 +85,58 @@ export class MobileService {
       nearest_port: portRes.rows[0] || null,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  async submitCaptainStep(dto: {
+    vessel_id?: string;
+    voyage_id: string;
+    step: 1 | 2 | 3 | 4 | 5;
+    lat?: number;
+    lng?: number;
+    fuel_start_liters?: number;
+    fuel_added_liters?: number;
+    fuel_end_liters?: number;
+    fuel_start_photo_url?: string;
+    fuel_end_photo_url?: string;
+    pod_photo_url?: string;
+    notes?: string;
+    timestamp?: string;
+  }) {
+    if (dto.vessel_id && dto.lat !== undefined && dto.lng !== undefined) {
+      await this.trackingService.ingestAisPing({
+        vessel_id: dto.vessel_id,
+        voyage_id: dto.voyage_id,
+        lat: Number(dto.lat),
+        lng: Number(dto.lng),
+        speed_knots: dto.step === 3 ? 7.5 : 0,
+      });
+    }
+
+    if (dto.vessel_id) {
+      const nextVesselStatus =
+        dto.step === 3 ? 'IN_VOYAGE' : dto.step === 5 ? 'AVAILABLE' : null;
+      const fuelVal =
+        dto.step === 1
+          ? dto.fuel_start_liters
+          : dto.step === 5
+            ? dto.fuel_end_liters
+            : null;
+      if (nextVesselStatus || fuelVal !== null) {
+        await this.db.query(
+          `
+          UPDATE vessels
+          SET
+            status = COALESCE($2, status),
+            current_fuel_liters = COALESCE($3, current_fuel_liters),
+            updated_at = NOW()
+          WHERE id = $1
+          `,
+          [dto.vessel_id, nextVesselStatus, fuelVal ?? null],
+        );
+      }
+    }
+
+    const updated = await this.dispatchService.submitCaptainStep(dto.voyage_id, dto);
+    return { ok: true, voyage: updated };
   }
 }

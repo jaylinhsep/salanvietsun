@@ -1,4 +1,8 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? '/api'
+    : 'http://localhost:4000/api');
 
 export interface Vessel {
   id: string;
@@ -95,6 +99,62 @@ export interface Voyage {
   detail_count?: number;
   detail_teus?: number;
   detail_revenue?: number;
+  workflow_step?: number;
+  fuel_start_liters?: number;
+  fuel_added_liters?: number;
+  fuel_end_liters?: number;
+  fuel_unit_price?: number;
+  loading_completed_at?: string;
+  atd?: string;
+  ata?: string;
+  laytime_start_at?: string;
+  completed_unloading_at?: string;
+  port_fee?: number;
+  crew_salary?: number;
+  other_cost?: number;
+  pod_photo_url?: string;
+  fuel_start_photo_url?: string;
+  fuel_end_photo_url?: string;
+  captain_report_log?: CaptainReportEntry[];
+  booking_nos?: string;
+  earliest_closing_time?: string;
+  estimated_freight?: number;
+  created_at?: string;
+}
+
+export interface CaptainReportEntry {
+  step: number;
+  timestamp: string;
+  lat?: number | null;
+  lng?: number | null;
+  notes?: string | null;
+}
+
+export interface Booking {
+  id: string;
+  booking_no: string;
+  customer_id?: string;
+  customer_name?: string;
+  resolved_customer_name?: string;
+  customer_code?: string;
+  origin_port_id?: string;
+  origin_name?: string;
+  resolved_origin_name?: string;
+  destination_port_id?: string;
+  dest_name?: string;
+  resolved_dest_name?: string;
+  cont_20e: number;
+  cont_20f: number;
+  cont_40e: number;
+  cont_40f: number;
+  total_teus: number;
+  closing_time?: string;
+  voyage_id?: string | null;
+  voyage_no?: string | null;
+  status: 'PENDING' | 'ASSIGNED' | 'IN_TRANSIT' | 'COMPLETED';
+  estimated_freight?: number;
+  notes?: string;
+  created_at?: string;
 }
 
 export type ContType = '20E' | '20F' | '40E' | '40F';
@@ -105,6 +165,8 @@ export interface VoyageContainer {
   barge_code?: string;
   trip_no?: string;
   container_no: string;
+  seal_no?: string;
+  booking_no?: string;
   origin_name?: string;
   destination_name?: string;
   shipper_name?: string;

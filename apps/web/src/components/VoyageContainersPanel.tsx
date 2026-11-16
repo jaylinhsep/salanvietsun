@@ -35,6 +35,7 @@ interface DraftRow {
   barge_code: string;
   trip_no: string;
   container_no: string;
+  seal_no: string;
   origin_name: string;
   destination_name: string;
   shipper_name: string;
@@ -81,6 +82,7 @@ function makeDefaultDraft(voyage: Voyage): DraftRow {
     barge_code: voyage.vessel_code || voyage.vessel_name || '',
     trip_no: voyage.voyage_no || '',
     container_no: '',
+    seal_no: '',
     origin_name: voyage.origin_name || '',
     destination_name: voyage.dest_name || '',
     shipper_name: voyage.customer_name || voyage.customer_code || '',
@@ -144,6 +146,7 @@ function parseExcelPaste(text: string, fallback: DraftRow): DraftRow[] {
       barge_code: cols[0] || fallback.barge_code,
       trip_no: cols[1] || fallback.trip_no,
       container_no: containerNo,
+      seal_no: cols[16] || '',
       origin_name: cols[3] || fallback.origin_name,
       destination_name: cols[4] || fallback.destination_name,
       shipper_name: cols[5] || fallback.shipper_name,
@@ -284,7 +287,7 @@ export function VoyageContainersPanel({
         alert(`Không thể thêm container (${res.status}): ${await res.text()}`);
         return;
       }
-      setNewRow((prev) => ({ ...prev, container_no: '', notes: '' }));
+      setNewRow((prev) => ({ ...prev, container_no: '', seal_no: '', notes: '' }));
       await loadContainers();
       onVoyageUpdated();
       setTimeout(() => contNoInputRef.current?.focus(), 50);
@@ -299,6 +302,7 @@ export function VoyageContainersPanel({
       barge_code: r.barge_code || '',
       trip_no: r.trip_no || '',
       container_no: r.container_no || '',
+      seal_no: r.seal_no || '',
       origin_name: r.origin_name || '',
       destination_name: r.destination_name || '',
       shipper_name: r.shipper_name || '',
@@ -386,6 +390,7 @@ export function VoyageContainersPanel({
       'SALAN',
       'SO CHUYEN',
       'SO CONT',
+      'SO SEAL',
       'CANG DI',
       'CANG DEN',
       'CHU HANG',
@@ -407,6 +412,7 @@ export function VoyageContainersPanel({
           r.barge_code || '',
           r.trip_no || '',
           r.container_no,
+          r.seal_no || '',
           r.origin_name || '',
           r.destination_name || '',
           r.shipper_name || '',
@@ -559,6 +565,9 @@ export function VoyageContainersPanel({
                   SỐ CONT
                 </th>
                 <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300">
+                  SỐ SEAL
+                </th>
+                <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300">
                   CẢNG ĐI
                 </th>
                 <th rowSpan={2} className="px-2.5 py-2 border-r border-slate-300">
@@ -636,6 +645,14 @@ export function VoyageContainersPanel({
                       }
                     }}
                     placeholder="MSMU1758748"
+                  />
+                </td>
+                <td className="px-1 py-1.5 border-r border-slate-200">
+                  <input
+                    className="w-24 border border-slate-300 rounded px-1.5 py-1 bg-white text-xs font-mono uppercase"
+                    value={newRow.seal_no}
+                    onChange={(e) => setNewRow({ ...newRow, seal_no: e.target.value.toUpperCase() })}
+                    placeholder="SL12345"
                   />
                 </td>
                 <td className="px-1 py-1.5 border-r border-slate-200">
@@ -800,6 +817,15 @@ export function VoyageContainersPanel({
                         </td>
                         <td className="px-1 py-1.5 border-r border-slate-200">
                           <input
+                            className="w-24 border rounded px-1.5 py-1 bg-white text-xs font-mono uppercase"
+                            value={editRow.seal_no}
+                            onChange={(e) =>
+                              setEditRow({ ...editRow, seal_no: e.target.value.toUpperCase() })
+                            }
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200">
+                          <input
                             list="dl-ports"
                             className="w-28 border rounded px-1.5 py-1 bg-white text-xs"
                             value={editRow.origin_name}
@@ -923,6 +949,9 @@ export function VoyageContainersPanel({
                       >
                         {r.container_no}
                       </td>
+                      <td className="px-2.5 py-2 border-r border-slate-200 font-mono text-slate-600">
+                        {r.seal_no || '—'}
+                      </td>
                       <td className="px-2.5 py-2 border-r border-slate-200">{r.origin_name || '—'}</td>
                       <td className="px-2.5 py-2 border-r border-slate-200">
                         {r.destination_name || '—'}
@@ -981,7 +1010,7 @@ export function VoyageContainersPanel({
             {rows.length > 0 && (
               <tfoot className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
                 <tr>
-                  <td colSpan={8} className="px-3 py-2.5 text-right border-r border-slate-300">
+                  <td colSpan={9} className="px-3 py-2.5 text-right border-r border-slate-300">
                     TỔNG CỘNG ({rows.length} cont / {stats.totalTeus} TEUs):
                   </td>
                   <td className="px-2 py-2.5 text-center border-r border-slate-300">{stats.c20e}</td>

@@ -43,6 +43,50 @@ export class DispatchService implements OnModuleInit {
         );
         CREATE INDEX IF NOT EXISTS idx_voyage_containers_voyage_id ON voyage_containers(voyage_id);
         CREATE INDEX IF NOT EXISTS idx_voyage_containers_container_no ON voyage_containers(container_no);
+
+        CREATE TABLE IF NOT EXISTS bookings (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          booking_no VARCHAR(80) NOT NULL,
+          customer_id UUID REFERENCES customers(id),
+          customer_name VARCHAR(150),
+          origin_port_id UUID REFERENCES ports(id),
+          origin_name VARCHAR(150),
+          destination_port_id UUID REFERENCES ports(id),
+          dest_name VARCHAR(150),
+          cont_20e INT NOT NULL DEFAULT 0,
+          cont_20f INT NOT NULL DEFAULT 0,
+          cont_40e INT NOT NULL DEFAULT 0,
+          cont_40f INT NOT NULL DEFAULT 0,
+          total_teus INT NOT NULL DEFAULT 0,
+          closing_time TIMESTAMPTZ,
+          voyage_id UUID REFERENCES voyages(id) ON DELETE SET NULL,
+          status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+          estimated_freight NUMERIC(14, 2) NOT NULL DEFAULT 0,
+          notes TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_bookings_voyage_id ON bookings(voyage_id);
+        CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
+
+        ALTER TABLE voyage_containers ADD COLUMN IF NOT EXISTS seal_no VARCHAR(60);
+        ALTER TABLE voyage_containers ADD COLUMN IF NOT EXISTS booking_no VARCHAR(80);
+
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS workflow_step INT DEFAULT 0;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS fuel_start_liters NUMERIC(12, 2) DEFAULT 0;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS fuel_added_liters NUMERIC(12, 2) DEFAULT 0;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS fuel_end_liters NUMERIC(12, 2) DEFAULT 0;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS fuel_unit_price NUMERIC(12, 2) DEFAULT 21500;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS loading_completed_at TIMESTAMPTZ;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS laytime_start_at TIMESTAMPTZ;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS completed_unloading_at TIMESTAMPTZ;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS port_fee NUMERIC(14, 2) DEFAULT 0;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS crew_salary NUMERIC(14, 2) DEFAULT 0;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS other_cost NUMERIC(14, 2) DEFAULT 0;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS pod_photo_url TEXT;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS fuel_start_photo_url TEXT;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS fuel_end_photo_url TEXT;
+        ALTER TABLE voyages ADD COLUMN IF NOT EXISTS captain_report_log JSONB DEFAULT '[]'::jsonb;
       `);
     } catch (err: any) {
       this.logger.warn(`Auto-migration voyages skipped: ${err.message}`);
@@ -171,7 +215,19 @@ export class DispatchService implements OnModuleInit {
         ST_Y(dp.location::geometry) AS dest_lat, ST_X(dp.location::geometry) AS dest_lng,
         COALESCE(vc.detail_count, 0) AS detail_count,
         COALESCE(vc.detail_teus, 0) AS detail_teus,
-        COALESCE(vc.detail_revenue, 0) AS detail_revenue
+        COALESCE(vc.detail_revenue, 0) AS detail_revenue,
+        COALESCE(vy.workflow_step, 0) AS workflow_step,
+        COALESCE(vy.fuel_start_liters, 0)::float AS fuel_start_liters,
+        COALESCE(vy.fuel_added_liters, 0)::float AS fuel_added_liters,
+        COALESCE(vy.fuel_end_liters, 0)::float AS fuel_end_liters,
+        COALESCE(vy.fuel_unit_price, 21500)::float AS fuel_unit_price,
+        vy.loading_completed_at, vy.laytime_start_at, vy.completed_unloading_at,
+        COALESCE(vy.port_fee, 0)::float AS port_fee,
+        COALESCE(vy.crew_salary, 0)::float AS crew_salary,
+        COALESCE(vy.other_cost, 0)::float AS other_cost,
+        vy.pod_photo_url, vy.fuel_start_photo_url, vy.fuel_end_photo_url,
+        COALESCE(vy.captain_report_log, '[]'::jsonb) AS captain_report_log,
+        bk.booking_nos, bk.earliest_closing_time
       FROM voyages vy
       LEFT JOIN customers c ON c.id = vy.customer_id
       LEFT JOIN vessels v ON v.id = vy.vessel_id
@@ -187,6 +243,15 @@ export class DispatchService implements OnModuleInit {
         FROM voyage_containers
         GROUP BY voyage_id
       ) vc ON vc.voyage_id = vy.id
+      LEFT JOIN (
+        SELECT
+          voyage_id,
+          STRING_AGG(booking_no, ', ' ORDER BY created_at ASC) AS booking_nos,
+          MIN(closing_time) AS earliest_closing_time
+        FROM bookings
+        WHERE voyage_id IS NOT NULL
+        GROUP BY voyage_id
+      ) bk ON bk.voyage_id = vy.id
       ORDER BY COALESCE(vy.received_date, vy.created_at::date) DESC, vy.created_at DESC
     `);
     return res.rows;
@@ -367,6 +432,15 @@ export class DispatchService implements OnModuleInit {
     return '20F';
   }
 
+  private static readonly CONTAINER_SELECT = `
+    id, voyage_id, barge_code, trip_no, container_no,
+    seal_no, booking_no,
+    origin_name, destination_name, shipper_name,
+    departure_date, cont_type,
+    unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
+    notes, created_at, updated_at
+  `;
+
   private normalizeContainerPayload(dto: any) {
     const unitPrice = Number(dto.unit_price || 0);
     const baf = Number(dto.baf || 0);
@@ -379,6 +453,8 @@ export class DispatchService implements OnModuleInit {
       barge_code: dto.barge_code ? String(dto.barge_code).trim() : null,
       trip_no: dto.trip_no ? String(dto.trip_no).trim() : null,
       container_no: String(dto.container_no || '').trim().toUpperCase(),
+      seal_no: dto.seal_no ? String(dto.seal_no).trim().toUpperCase() : null,
+      booking_no: dto.booking_no ? String(dto.booking_no).trim().toUpperCase() : null,
       origin_name: dto.origin_name ? String(dto.origin_name).trim() : null,
       destination_name: dto.destination_name ? String(dto.destination_name).trim() : null,
       shipper_name: dto.shipper_name ? String(dto.shipper_name).trim() : null,
@@ -395,12 +471,7 @@ export class DispatchService implements OnModuleInit {
   async listVoyageContainers(voyageId: string) {
     const res = await this.db.query(
       `
-      SELECT
-        id, voyage_id, barge_code, trip_no, container_no,
-        origin_name, destination_name, shipper_name,
-        departure_date, cont_type,
-        unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
-        notes, created_at, updated_at
+      SELECT ${DispatchService.CONTAINER_SELECT}
       FROM voyage_containers
       WHERE voyage_id = $1
       ORDER BY departure_date ASC NULLS LAST, created_at ASC, id ASC
@@ -415,22 +486,19 @@ export class DispatchService implements OnModuleInit {
     const res = await this.db.query(
       `
       INSERT INTO voyage_containers (
-        voyage_id, barge_code, trip_no, container_no,
+        voyage_id, barge_code, trip_no, container_no, seal_no, booking_no,
         origin_name, destination_name, shipper_name, departure_date,
         cont_type, unit_price, baf, total_amount, fuel_price_no_vat, notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-      RETURNING
-        id, voyage_id, barge_code, trip_no, container_no,
-        origin_name, destination_name, shipper_name,
-        departure_date, cont_type,
-        unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
-        notes, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      RETURNING ${DispatchService.CONTAINER_SELECT}
       `,
       [
         voyageId,
         p.barge_code,
         p.trip_no,
         p.container_no,
+        p.seal_no,
+        p.booking_no,
         p.origin_name,
         p.destination_name,
         p.shipper_name,
@@ -464,22 +532,19 @@ export class DispatchService implements OnModuleInit {
         const res = await client.query(
           `
           INSERT INTO voyage_containers (
-            voyage_id, barge_code, trip_no, container_no,
+            voyage_id, barge_code, trip_no, container_no, seal_no, booking_no,
             origin_name, destination_name, shipper_name, departure_date,
             cont_type, unit_price, baf, total_amount, fuel_price_no_vat, notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-          RETURNING
-            id, voyage_id, barge_code, trip_no, container_no,
-            origin_name, destination_name, shipper_name,
-            departure_date, cont_type,
-            unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
-            notes, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          RETURNING ${DispatchService.CONTAINER_SELECT}
           `,
           [
             voyageId,
             p.barge_code,
             p.trip_no,
             p.container_no,
+            p.seal_no,
+            p.booking_no,
             p.origin_name,
             p.destination_name,
             p.shipper_name,
@@ -507,30 +572,29 @@ export class DispatchService implements OnModuleInit {
         barge_code = COALESCE($2, barge_code),
         trip_no = COALESCE($3, trip_no),
         container_no = CASE WHEN $4 <> '' THEN $4 ELSE container_no END,
-        origin_name = COALESCE($5, origin_name),
-        destination_name = COALESCE($6, destination_name),
-        shipper_name = COALESCE($7, shipper_name),
-        departure_date = COALESCE($8, departure_date),
-        cont_type = $9,
-        unit_price = $10,
-        baf = $11,
-        total_amount = $12,
-        fuel_price_no_vat = $13,
-        notes = $14,
+        seal_no = $5,
+        booking_no = $6,
+        origin_name = COALESCE($7, origin_name),
+        destination_name = COALESCE($8, destination_name),
+        shipper_name = COALESCE($9, shipper_name),
+        departure_date = COALESCE($10, departure_date),
+        cont_type = $11,
+        unit_price = $12,
+        baf = $13,
+        total_amount = $14,
+        fuel_price_no_vat = $15,
+        notes = $16,
         updated_at = NOW()
       WHERE id = $1
-      RETURNING
-        id, voyage_id, barge_code, trip_no, container_no,
-        origin_name, destination_name, shipper_name,
-        departure_date, cont_type,
-        unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
-        notes, created_at, updated_at
+      RETURNING ${DispatchService.CONTAINER_SELECT}
       `,
       [
         containerId,
         p.barge_code,
         p.trip_no,
         p.container_no,
+        p.seal_no,
+        p.booking_no,
         p.origin_name,
         p.destination_name,
         p.shipper_name,
@@ -577,5 +641,276 @@ export class DispatchService implements OnModuleInit {
       [voyageId, c.c20e, c.c20f, c.c40e, c.c40f, totalTeus],
     );
     return upd.rows[0];
+  }
+
+  // --- BOOKINGS (BƯỚC 1 & 2: GOM ĐƠN & ĐIỀU ĐỘ 1 CHẠM) ---
+  async listBookings() {
+    const res = await this.db.query(`
+      SELECT
+        b.*, b.estimated_freight::float,
+        COALESCE(c.name, b.customer_name) AS resolved_customer_name,
+        c.code AS customer_code,
+        COALESCE(op.name, b.origin_name) AS resolved_origin_name,
+        COALESCE(dp.name, b.dest_name) AS resolved_dest_name,
+        vy.voyage_no
+      FROM bookings b
+      LEFT JOIN customers c ON c.id = b.customer_id
+      LEFT JOIN ports op ON op.id = b.origin_port_id
+      LEFT JOIN ports dp ON dp.id = b.destination_port_id
+      LEFT JOIN voyages vy ON vy.id = b.voyage_id
+      ORDER BY
+        CASE WHEN b.voyage_id IS NULL THEN 0 ELSE 1 END ASC,
+        b.closing_time ASC NULLS LAST,
+        b.created_at DESC
+    `);
+    return res.rows;
+  }
+
+  async createBooking(dto: any) {
+    const c20e = Number(dto.cont_20e || 0);
+    const c20f = Number(dto.cont_20f || 0);
+    const c40e = Number(dto.cont_40e || 0);
+    const c40f = Number(dto.cont_40f || 0);
+    const totalTeus = this.computeTeus(c20e, c20f, c40e, c40f);
+
+    const res = await this.db.query(
+      `
+      INSERT INTO bookings (
+        booking_no, customer_id, customer_name,
+        origin_port_id, origin_name, destination_port_id, dest_name,
+        cont_20e, cont_20f, cont_40e, cont_40f, total_teus,
+        closing_time, estimated_freight, notes, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'PENDING')
+      RETURNING *
+      `,
+      [
+        String(dto.booking_no || `BK-${Date.now().toString().slice(-6)}`).trim().toUpperCase(),
+        dto.customer_id || null,
+        dto.customer_name || null,
+        dto.origin_port_id || null,
+        dto.origin_name || null,
+        dto.destination_port_id || null,
+        dto.dest_name || null,
+        c20e,
+        c20f,
+        c40e,
+        c40f,
+        totalTeus,
+        dto.closing_time || null,
+        Number(dto.estimated_freight || 0),
+        dto.notes || null,
+      ],
+    );
+    return res.rows[0];
+  }
+
+  async deleteBooking(id: string) {
+    await this.db.query(`DELETE FROM bookings WHERE id = $1`, [id]);
+    return { ok: true };
+  }
+
+  async assignBookingsToBarge(dto: {
+    booking_ids: string[];
+    vessel_id: string;
+    voyage_id?: string;
+    voyage_no?: string;
+  }) {
+    const bookingIds = Array.isArray(dto.booking_ids) ? dto.booking_ids : [];
+    if (bookingIds.length === 0) return { ok: false, message: 'Chưa chọn booking nào' };
+
+    return this.db.transaction(async (client) => {
+      const bkRes = await client.query(
+        `SELECT * FROM bookings WHERE id = ANY($1::uuid[])`,
+        [bookingIds],
+      );
+      const selected = bkRes.rows;
+      if (selected.length === 0) return { ok: false, message: 'Không tìm thấy booking' };
+
+      const sum20e = selected.reduce((s, b) => s + Number(b.cont_20e || 0), 0);
+      const sum20f = selected.reduce((s, b) => s + Number(b.cont_20f || 0), 0);
+      const sum40e = selected.reduce((s, b) => s + Number(b.cont_40e || 0), 0);
+      const sum40f = selected.reduce((s, b) => s + Number(b.cont_40f || 0), 0);
+      const sumTeus = this.computeTeus(sum20e, sum20f, sum40e, sum40f);
+      const first = selected[0];
+      const maxDeadline = selected
+        .map((b) => b.closing_time)
+        .filter(Boolean)
+        .sort()[0];
+
+      let targetVoyageId = dto.voyage_id || null;
+      if (targetVoyageId) {
+        await client.query(
+          `
+          UPDATE voyages
+          SET
+            cont_20e = COALESCE(cont_20e, 0) + $2,
+            cont_20f = COALESCE(cont_20f, 0) + $3,
+            cont_40e = COALESCE(cont_40e, 0) + $4,
+            cont_40f = COALESCE(cont_40f, 0) + $5,
+            total_teus = COALESCE(total_teus, 0) + $6
+          WHERE id = $1
+          `,
+          [targetVoyageId, sum20e, sum20f, sum40e, sum40f, sumTeus],
+        );
+      } else {
+        const voyageNo =
+          dto.voyage_no || `VOY-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const vyRes = await client.query(
+          `
+          INSERT INTO voyages (
+            voyage_no, vessel_id, customer_id,
+            origin_port_id, destination_port_id,
+            received_date, cont_20e, cont_20f, cont_40e, cont_40f, total_teus,
+            order_deadline, status, workflow_step
+          ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, $7, $8, $9, $10, $11, 'PLANNED', 0)
+          RETURNING id
+          `,
+          [
+            voyageNo,
+            dto.vessel_id,
+            first.customer_id || null,
+            first.origin_port_id || null,
+            first.destination_port_id || null,
+            sum20e,
+            sum20f,
+            sum40e,
+            sum40f,
+            sumTeus,
+            maxDeadline ? String(maxDeadline).slice(0, 10) : null,
+          ],
+        );
+        targetVoyageId = vyRes.rows[0].id;
+      }
+
+      await client.query(
+        `UPDATE bookings SET voyage_id = $2, status = 'ASSIGNED', updated_at = NOW() WHERE id = ANY($1::uuid[])`,
+        [bookingIds, targetVoyageId],
+      );
+
+      return { ok: true, voyage_id: targetVoyageId, assignedCount: selected.length };
+    });
+  }
+
+  // --- BƯỚC 3 & 4: QUYẾT TOÁN & CẬP NHẬT BƯỚC THUYỀN TRƯỞNG ---
+  async submitCaptainStep(
+    voyageId: string,
+    dto: {
+      step: 1 | 2 | 3 | 4 | 5;
+      lat?: number;
+      lng?: number;
+      fuel_start_liters?: number;
+      fuel_added_liters?: number;
+      fuel_end_liters?: number;
+      fuel_start_photo_url?: string;
+      fuel_end_photo_url?: string;
+      pod_photo_url?: string;
+      notes?: string;
+      timestamp?: string;
+    },
+  ) {
+    const ts = dto.timestamp || new Date().toISOString();
+    const logEntry = JSON.stringify([
+      {
+        step: dto.step,
+        timestamp: ts,
+        lat: dto.lat ?? null,
+        lng: dto.lng ?? null,
+        notes: dto.notes ?? null,
+      },
+    ]);
+
+    const nextStatus =
+      dto.step === 3
+        ? 'IN_TRANSIT'
+        : dto.step === 4
+          ? 'ARRIVED'
+          : dto.step === 5
+            ? 'COMPLETED'
+            : null;
+
+    const res = await this.db.query(
+      `
+      UPDATE voyages
+      SET
+        workflow_step = GREATEST(COALESCE(workflow_step, 0), $2),
+        status = COALESCE($3, status),
+        fuel_start_liters = COALESCE($4, fuel_start_liters),
+        fuel_added_liters = COALESCE($5, fuel_added_liters),
+        fuel_end_liters = COALESCE($6, fuel_end_liters),
+        fuel_start_photo_url = COALESCE($7, fuel_start_photo_url),
+        fuel_end_photo_url = COALESCE($8, fuel_end_photo_url),
+        pod_photo_url = COALESCE($9, pod_photo_url),
+        loading_completed_at = CASE WHEN $2 = 2 THEN COALESCE(loading_completed_at, $10::timestamptz) ELSE loading_completed_at END,
+        atd = CASE WHEN $2 = 3 THEN COALESCE(atd, $10::timestamptz) ELSE atd END,
+        ata = CASE WHEN $2 = 4 THEN COALESCE(ata, $10::timestamptz) ELSE ata END,
+        laytime_start_at = CASE WHEN $2 = 4 THEN COALESCE(laytime_start_at, $10::timestamptz) ELSE laytime_start_at END,
+        completed_unloading_at = CASE WHEN $2 = 5 THEN COALESCE(completed_unloading_at, $10::timestamptz) ELSE completed_unloading_at END,
+        captain_report_log = COALESCE(captain_report_log, '[]'::jsonb) || $11::jsonb
+      WHERE id = $1
+      RETURNING *
+      `,
+      [
+        voyageId,
+        dto.step,
+        nextStatus,
+        dto.fuel_start_liters ?? null,
+        dto.fuel_added_liters ?? null,
+        dto.fuel_end_liters ?? null,
+        dto.fuel_start_photo_url ?? null,
+        dto.fuel_end_photo_url ?? null,
+        dto.pod_photo_url ?? null,
+        ts,
+        logEntry,
+      ],
+    );
+
+    if (dto.step === 5) {
+      await this.db.query(
+        `UPDATE bookings SET status = 'COMPLETED', updated_at = NOW() WHERE voyage_id = $1`,
+        [voyageId],
+      );
+    }
+
+    return res.rows[0];
+  }
+
+  async updateVoyageSettlement(
+    voyageId: string,
+    dto: {
+      fuel_start_liters?: number;
+      fuel_added_liters?: number;
+      fuel_end_liters?: number;
+      fuel_unit_price?: number;
+      port_fee?: number;
+      crew_salary?: number;
+      other_cost?: number;
+    },
+  ) {
+    const res = await this.db.query(
+      `
+      UPDATE voyages
+      SET
+        fuel_start_liters = COALESCE($2, fuel_start_liters),
+        fuel_added_liters = COALESCE($3, fuel_added_liters),
+        fuel_end_liters = COALESCE($4, fuel_end_liters),
+        fuel_unit_price = COALESCE($5, fuel_unit_price),
+        port_fee = COALESCE($6, port_fee),
+        crew_salary = COALESCE($7, crew_salary),
+        other_cost = COALESCE($8, other_cost)
+      WHERE id = $1
+      RETURNING *
+      `,
+      [
+        voyageId,
+        dto.fuel_start_liters ?? null,
+        dto.fuel_added_liters ?? null,
+        dto.fuel_end_liters ?? null,
+        dto.fuel_unit_price ?? null,
+        dto.port_fee ?? null,
+        dto.crew_salary ?? null,
+        dto.other_cost ?? null,
+      ],
+    );
+    return res.rows[0];
   }
 }

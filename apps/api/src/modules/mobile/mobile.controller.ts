@@ -18,4 +18,10 @@ export class MobileController {
   captainCheckIn(@Body() body: any) {
     return this.mobileService.captainCheckIn(body);
   }
+
+  @Post('step')
+  @ApiOperation({ summary: 'Thuyền trưởng báo cáo 5 bước hành trình (hỗ trợ đồng bộ offline)' })
+  submitStep(@Body() body: any) {
+    return this.mobileService.submitCaptainStep(body);
+  }
 }

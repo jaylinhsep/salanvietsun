@@ -93,4 +93,34 @@ export class DispatchController {
   deleteVoyageContainer(@Param('containerId') containerId: string) {
     return this.dispatchService.deleteVoyageContainer(containerId);
   }
+
+  @Get('bookings')
+  @ApiOperation({ summary: 'Danh sách Booking chờ xếp tàu & đã gán chuyến' })
+  listBookings() {
+    return this.dispatchService.listBookings();
+  }
+
+  @Post('bookings')
+  @ApiOperation({ summary: 'Tạo Booking vận chuyển mới (Bước 1)' })
+  createBooking(@Body() body: any) {
+    return this.dispatchService.createBooking(body);
+  }
+
+  @Delete('bookings/:id')
+  @ApiOperation({ summary: 'Xóa Booking' })
+  deleteBooking(@Param('id') id: string) {
+    return this.dispatchService.deleteBooking(id);
+  }
+
+  @Post('bookings/assign')
+  @ApiOperation({ summary: 'Ghép 1 hoặc nhiều Booking vào Sà lan / Chuyến (Điều độ 1 chạm)' })
+  assignBookings(@Body() body: { booking_ids: string[]; vessel_id: string; voyage_id?: string; voyage_no?: string }) {
+    return this.dispatchService.assignBookingsToBarge(body);
+  }
+
+  @Patch('voyages/:id/settlement')
+  @ApiOperation({ summary: 'Cập nhật chi phí nhiên liệu / cảng / lương chuyến để chốt lãi lỗ' })
+  updateSettlement(@Param('id') id: string, @Body() body: any) {
+    return this.dispatchService.updateVoyageSettlement(id, body);
+  }
 }
