@@ -328,11 +328,6 @@ export function VoyageContainersPanel({
 
   const handleAddRow = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!newRow.container_no.trim()) {
-      alert('Vui lòng nhập SỐ CONT.');
-      contNoInputRef.current?.focus();
-      return;
-    }
     setSaving(true);
     try {
       const res = await fetch(`${API_URL}/dispatch/voyages/${voyage.id}/containers`, {

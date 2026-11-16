@@ -604,7 +604,15 @@ export default function DispatchPage() {
                           </div>
                           <div className="text-[10px] text-slate-500">
                             {vy.detail_count ? (
-                              <span className="text-emerald-700 font-medium">{vy.detail_count} cont chi tiết</span>
+                              (vy.named_cont_count ?? vy.detail_count) >= vy.detail_count ? (
+                                <span className="text-emerald-700 font-medium">{vy.detail_count} cont chi tiết</span>
+                              ) : (vy.named_cont_count || 0) > 0 ? (
+                                <span className="text-amber-700 font-medium">
+                                  {vy.named_cont_count}/{vy.detail_count} số cont
+                                </span>
+                              ) : (
+                                <span className="text-slate-600">{vy.detail_count} dòng (chưa có số cont)</span>
+                              )
                             ) : (
                               'Chưa nhập cont'
                             )}

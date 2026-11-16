@@ -231,6 +231,7 @@ export class DispatchService implements OnModuleInit {
         vy.destination_port_id, dp.code AS dest_code, dp.name AS dest_name,
         ST_Y(dp.location::geometry) AS dest_lat, ST_X(dp.location::geometry) AS dest_lng,
         COALESCE(vc.detail_count, 0) AS detail_count,
+        COALESCE(vc.named_cont_count, 0) AS named_cont_count,
         COALESCE(vc.detail_teus, 0) AS detail_teus,
         COALESCE(vc.detail_revenue, 0) AS detail_revenue,
         COALESCE(vy.workflow_step, 0) AS workflow_step,
@@ -255,6 +256,7 @@ export class DispatchService implements OnModuleInit {
         SELECT
           voyage_id,
           COUNT(*)::int AS detail_count,
+          COALESCE(SUM(CASE WHEN COALESCE(TRIM(container_no), '') <> '' THEN 1 ELSE 0 END), 0)::int AS named_cont_count,
           COALESCE(SUM(CASE WHEN cont_type IN ('40E', '40F') THEN 2 ELSE 1 END), 0)::int AS detail_teus,
           COALESCE(SUM(total_amount), 0)::float AS detail_revenue
         FROM voyage_containers
@@ -288,6 +290,60 @@ export class DispatchService implements OnModuleInit {
     if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
     const parsed = new Date(str);
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+  }
+
+  private async insertPlaceholderContainers(
+    queryable: { query: (text: string, params?: any[]) => Promise<any> },
+    params: {
+      voyageId: string;
+      bargeCode: string | null;
+      tripNo: string | null;
+      bookingNo?: string | null;
+      originName?: string | null;
+      destinationName?: string | null;
+      shipperName?: string | null;
+      departureDate: string | null;
+      status?: string;
+      cont_20e?: number;
+      cont_20f?: number;
+      cont_40e?: number;
+      cont_40f?: number;
+    },
+  ) {
+    const depDate = this.toIsoDateOnly(params.departureDate) || new Date().toISOString().slice(0, 10);
+    const accMonth = depDate.slice(0, 7);
+    const counts: Array<[string, number]> = [
+      ['20E', Number(params.cont_20e || 0)],
+      ['20F', Number(params.cont_20f || 0)],
+      ['40E', Number(params.cont_40e || 0)],
+      ['40F', Number(params.cont_40f || 0)],
+    ];
+    for (const [ct, n] of counts) {
+      for (let i = 0; i < n; i++) {
+        await queryable.query(
+          `
+          INSERT INTO voyage_containers (
+            voyage_id, barge_code, trip_no, container_no, booking_no,
+            origin_name, destination_name, shipper_name, departure_date,
+            accounting_month, status, cont_type, unit_price, baf, total_amount, fuel_price_no_vat
+          ) VALUES ($1, $2, $3, '', $4, $5, $6, $7, $8, $9, $10, $11, 0, 0, 0, 0)
+          `,
+          [
+            params.voyageId,
+            params.bargeCode,
+            params.tripNo,
+            params.bookingNo || null,
+            params.originName || null,
+            params.destinationName || null,
+            params.shipperName || null,
+            depDate,
+            accMonth,
+            params.status || 'PLANNED',
+            ct,
+          ],
+        );
+      }
+    }
   }
 
   async createVoyage(dto: {
@@ -361,7 +417,35 @@ export class DispatchService implements OnModuleInit {
         dto.captain_notes || null,
       ],
     );
-    return res.rows[0];
+    const createdVy = res.rows[0];
+    if (totalTeus > 0) {
+      const metaRes = await this.db.query(
+        `
+        SELECT
+          (SELECT code FROM vessels WHERE id = $1 LIMIT 1) AS vessel_code,
+          (SELECT name FROM ports WHERE id = $2 LIMIT 1) AS origin_name,
+          (SELECT name FROM ports WHERE id = $3 LIMIT 1) AS dest_name,
+          (SELECT name FROM customers WHERE id = $4 LIMIT 1) AS customer_name
+        `,
+        [dto.vessel_id || null, dto.origin_port_id, dto.destination_port_id, dto.customer_id || null],
+      );
+      const meta = metaRes.rows[0] || {};
+      await this.insertPlaceholderContainers(this.db, {
+        voyageId: createdVy.id,
+        bargeCode: meta.vessel_code || null,
+        tripNo: createdVy.voyage_no,
+        originName: meta.origin_name || null,
+        destinationName: meta.dest_name || null,
+        shipperName: meta.customer_name || null,
+        departureDate: this.toIsoDateOnly(createdVy.received_date),
+        status: createdVy.status,
+        cont_20e: dto.cont_20e,
+        cont_20f: dto.cont_20f,
+        cont_40e: dto.cont_40e,
+        cont_40f: dto.cont_40f,
+      });
+    }
+    return createdVy;
   }
 
   async updateVoyage(
@@ -498,7 +582,7 @@ export class DispatchService implements OnModuleInit {
     id, voyage_id, barge_code, trip_no, container_no,
     seal_no, booking_no,
     origin_name, destination_name, shipper_name,
-    departure_date, cont_type,
+    departure_date, accounting_month, status, cont_type,
     unit_price::float, baf::float, total_amount::float, fuel_price_no_vat::float,
     notes, created_at, updated_at
   `;
@@ -583,7 +667,7 @@ export class DispatchService implements OnModuleInit {
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
     const normalized = rows
       .map((r) => this.normalizeContainerPayload(r))
-      .filter((r) => r.container_no.length > 0);
+      .filter((r) => r.container_no.length > 0 || Boolean(r.cont_type));
 
     return this.db.transaction(async (client) => {
       if (payload?.replace) {
@@ -672,6 +756,7 @@ export class DispatchService implements OnModuleInit {
             ? Number(dto.unit_price ?? prev.unit_price ?? 0) + Number(dto.baf ?? prev.baf ?? 0)
             : prev.total_amount,
     };
+    const containerNoProvided = dto.container_no !== undefined;
     const p = this.normalizeContainerPayload(merged);
     const res = await this.db.query(
       `
@@ -679,7 +764,7 @@ export class DispatchService implements OnModuleInit {
       SET
         barge_code = $2,
         trip_no = $3,
-        container_no = CASE WHEN $4 <> '' THEN $4 ELSE container_no END,
+        container_no = CASE WHEN $17::boolean THEN $4 ELSE container_no END,
         seal_no = $5,
         booking_no = $6,
         origin_name = $7,
@@ -713,6 +798,7 @@ export class DispatchService implements OnModuleInit {
         p.total_amount,
         p.fuel_price_no_vat,
         p.notes,
+        containerNoProvided,
       ],
     );
     return res.rows[0];
@@ -1015,7 +1101,20 @@ export class DispatchService implements OnModuleInit {
         );
       }
 
+      let resolvedVoyageNo = dto.voyage_no || '';
+      let resolvedReceivedDate = this.toIsoDateOnly(new Date());
+      let resolvedStatus = 'PLANNED';
+
       if (targetVoyageId) {
+        const existingRes = await client.query(
+          `SELECT voyage_no, received_date, status FROM voyages WHERE id = $1`,
+          [targetVoyageId],
+        );
+        if (existingRes.rows[0]) {
+          resolvedVoyageNo = existingRes.rows[0].voyage_no;
+          resolvedReceivedDate = this.toIsoDateOnly(existingRes.rows[0].received_date) || resolvedReceivedDate;
+          resolvedStatus = existingRes.rows[0].status || resolvedStatus;
+        }
         await client.query(
           `
           UPDATE voyages
@@ -1032,6 +1131,7 @@ export class DispatchService implements OnModuleInit {
       } else {
         const voyageNo =
           dto.voyage_no || `VOY-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+        resolvedVoyageNo = voyageNo;
         const vyRes = await client.query(
           `
           INSERT INTO voyages (
@@ -1040,7 +1140,7 @@ export class DispatchService implements OnModuleInit {
             received_date, cont_20e, cont_20f, cont_40e, cont_40f, total_teus,
             order_deadline, status, workflow_step
           ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, $7, $8, $9, $10, $11, 'PLANNED', 0)
-          RETURNING id
+          RETURNING id, received_date
           `,
           [
             voyageNo,
@@ -1057,12 +1157,31 @@ export class DispatchService implements OnModuleInit {
           ],
         );
         targetVoyageId = vyRes.rows[0].id;
+        resolvedReceivedDate = this.toIsoDateOnly(vyRes.rows[0].received_date) || resolvedReceivedDate;
       }
 
       await client.query(
         `UPDATE bookings SET voyage_id = $2, status = 'ASSIGNED', updated_at = NOW() WHERE id = ANY($1::uuid[])`,
         [bookingIds, targetVoyageId],
       );
+
+      for (const bk of selected) {
+        await this.insertPlaceholderContainers(client, {
+          voyageId: targetVoyageId!,
+          bargeCode: vessel.code || vessel.name || null,
+          tripNo: resolvedVoyageNo,
+          bookingNo: bk.booking_no || null,
+          originName: bk.origin_name || null,
+          destinationName: bk.dest_name || null,
+          shipperName: bk.customer_name || null,
+          departureDate: resolvedReceivedDate,
+          status: resolvedStatus,
+          cont_20e: Number(bk.cont_20e || 0),
+          cont_20f: Number(bk.cont_20f || 0),
+          cont_40e: Number(bk.cont_40e || 0),
+          cont_40f: Number(bk.cont_40f || 0),
+        });
+      }
 
       return { ok: true, voyage_id: targetVoyageId, assignedCount: selected.length };
     });
@@ -1102,6 +1221,11 @@ export class DispatchService implements OnModuleInit {
       );
 
       await client.query(
+        `DELETE FROM voyage_containers WHERE voyage_id = $1 AND booking_no = $2 AND COALESCE(TRIM(container_no), '') = ''`,
+        [bk.voyage_id, bk.booking_no],
+      );
+
+      await client.query(
         `UPDATE bookings SET voyage_id = NULL, status = 'PENDING', updated_at = NOW() WHERE id = $1`,
         [bookingId],
       );
@@ -1120,6 +1244,11 @@ export class DispatchService implements OnModuleInit {
 
       const releasedRes = await client.query(
         `UPDATE bookings SET voyage_id = NULL, status = 'PENDING', updated_at = NOW() WHERE voyage_id = $1 RETURNING id`,
+        [voyageId],
+      );
+
+      await client.query(
+        `DELETE FROM voyage_containers WHERE voyage_id = $1 AND COALESCE(TRIM(container_no), '') = ''`,
         [voyageId],
       );
 

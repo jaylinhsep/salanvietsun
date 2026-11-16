@@ -303,6 +303,28 @@ async function run() {
     }
     const mapC = (id) => (id && custIdMap.has(id) ? custIdMap.get(id) : null);
 
+    // 0. Remove legacy demo/sample records so old data does not pollute live production reports
+    await client.query(`
+      DELETE FROM voyage_containers
+      WHERE trip_no IN ('VOY-2026-3239', 'VOY-2026-0081', 'VOY-2026-7871')
+         OR (trip_no = 'V.36-04926E' AND accounting_month IS NULL)
+         OR container_no IN ('MSBU1514898', 'VIMU6254878', 'VIMU6245006', 'VIMU6254651', 'VIMU6253249', 'SELU4741276', 'VIMU6254395');
+    `);
+    await client.query(`
+      DELETE FROM bookings
+      WHERE booking_no LIKE 'BK-26-%'
+         OR voyage_id IN ('a1b80c3a-c150-48ee-8f2a-0ccf9c738311', '55555555-5555-5555-5555-555555555501', 'e10a9e5a-5671-4aa0-88e4-24661dc3bb23');
+    `);
+    await client.query(`
+      DELETE FROM voyages
+      WHERE voyage_no IN ('VOY-2026-3239', 'VOY-2026-0081', 'V.36-04926E', 'VOY-2026-7871')
+         OR id IN ('a1b80c3a-c150-48ee-8f2a-0ccf9c738311', '55555555-5555-5555-5555-555555555501', 'e10a9e5a-5671-4aa0-88e4-24661dc3bb23');
+    `);
+    await client.query(`
+      DELETE FROM invoices WHERE invoice_no IN ('INV-2026-0041', 'INV-2026-0042');
+      DELETE FROM orders WHERE order_no IN ('ORD-2026-0101', 'ORD-2026-0102', 'ORD-2026-0103');
+    `);
+
     // 4. Voyages
     for (const vy of snap.voyages || []) {
       await client.query(
@@ -311,7 +333,12 @@ async function run() {
           etd, eta, status, received_date, pic_name, cont_20e, cont_20f, cont_40e, cont_40f,
           total_teus, vessel_berth_date, order_deadline, captain_notes, workflow_step
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-        ON CONFLICT (id) DO NOTHING`,
+        ON CONFLICT (id) DO UPDATE SET
+          cont_20e = EXCLUDED.cont_20e,
+          cont_20f = EXCLUDED.cont_20f,
+          cont_40e = EXCLUDED.cont_40e,
+          cont_40f = EXCLUDED.cont_40f,
+          total_teus = EXCLUDED.total_teus`,
         [
           vy.id, vy.voyage_no, mapV(vy.vessel_id), mapC(vy.customer_id),
           mapP(vy.origin_port_id), mapP(vy.destination_port_id),
@@ -348,7 +375,7 @@ async function run() {
       );
     }
 
-    // 6. Voyage Containers (891 containers)
+    // 6. Voyage Containers (verified 2026-10 + 2026-11 placeholder rows)
     for (const vc of snap.voyageContainers || []) {
       await client.query(
         `INSERT INTO voyage_containers (
@@ -356,10 +383,13 @@ async function run() {
           origin_name, destination_name, shipper_name, departure_date, accounting_month,
           status, cont_type, unit_price, baf, total_amount, fuel_price_no_vat, notes
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-        ON CONFLICT (id) DO NOTHING`,
+        ON CONFLICT (id) DO UPDATE SET
+          voyage_id = COALESCE(voyage_containers.voyage_id, EXCLUDED.voyage_id),
+          accounting_month = COALESCE(voyage_containers.accounting_month, EXCLUDED.accounting_month),
+          status = COALESCE(voyage_containers.status, EXCLUDED.status)`,
         [
           vc.id, vc.voyage_id || null, vc.barge_code || null, vc.trip_no || null,
-          vc.container_no, vc.seal_no || null, vc.booking_no || null,
+          vc.container_no ?? '', vc.seal_no || null, vc.booking_no || null,
           vc.origin_name || null, vc.destination_name || null, vc.shipper_name || null,
           vc.departure_date ? String(vc.departure_date).slice(0, 10) : null,
           vc.accounting_month || null, vc.status || 'COMPLETED',

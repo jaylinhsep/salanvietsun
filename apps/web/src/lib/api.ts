@@ -99,6 +99,7 @@ export interface Voyage {
   dest_lat?: number;
   dest_lng?: number;
   detail_count?: number;
+  named_cont_count?: number;
   detail_teus?: number;
   detail_revenue?: number;
   workflow_step?: number;

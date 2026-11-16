@@ -287,6 +287,9 @@ function hydrateVoyage(db, vy) {
   const details = db.voyageContainers.filter((c) => c.voyage_id === vy.id);
   const linkedBookings = db.bookings.filter((b) => b.voyage_id === vy.id);
 
+  const namedContCount = details.filter(
+    (c) => String(c.container_no || '').trim().length > 0,
+  ).length;
   const detailTeus = details.reduce(
     (s, c) => s + (c.cont_type === '40E' || c.cont_type === '40F' ? 2 : 1),
     0,
@@ -317,6 +320,7 @@ function hydrateVoyage(db, vy) {
     dest_lat: dp?.lat ?? vy.dest_lat ?? null,
     dest_lng: dp?.lng ?? vy.dest_lng ?? null,
     detail_count: details.length,
+    named_cont_count: namedContCount,
     detail_teus: detailTeus,
     detail_revenue: detailRev,
     booking_nos: bookingNos,
@@ -839,11 +843,51 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
+      const assignedVy = db.voyages.find((v) => v.id === targetVoyageId);
+      const depDate = String(assignedVy?.received_date || nowIso()).slice(0, 10);
+      const accMonth = depDate.slice(0, 7);
+
       for (const b of db.bookings) {
         if (ids.includes(b.id)) {
           b.voyage_id = targetVoyageId;
           b.status = 'ASSIGNED';
           b.updated_at = nowIso();
+
+          const bCust = db.customers.find((c) => c.id === b.customer_id);
+          const bOrig = db.ports.find((pt) => pt.id === b.origin_port_id);
+          const bDest = db.ports.find((pt) => pt.id === b.destination_port_id);
+          for (const [ct, cnt] of [
+            ['20E', Number(b.cont_20e || 0)],
+            ['20F', Number(b.cont_20f || 0)],
+            ['40E', Number(b.cont_40e || 0)],
+            ['40F', Number(b.cont_40f || 0)],
+          ]) {
+            for (let i = 0; i < cnt; i++) {
+              db.voyageContainers.push({
+                id: uuid(),
+                voyage_id: targetVoyageId,
+                barge_code: vessel?.code || vessel?.name || '',
+                trip_no: assignedVy?.voyage_no || '',
+                container_no: '',
+                seal_no: null,
+                booking_no: b.booking_no || null,
+                origin_name: bOrig?.name || b.origin_name || '',
+                destination_name: bDest?.name || b.dest_name || '',
+                shipper_name: bCust?.name || b.customer_name || '',
+                departure_date: depDate,
+                accounting_month: accMonth,
+                status: assignedVy?.status || 'PLANNED',
+                cont_type: ct,
+                unit_price: 0,
+                baf: 0,
+                total_amount: 0,
+                fuel_price_no_vat: 0,
+                notes: null,
+                created_at: nowIso(),
+                updated_at: nowIso(),
+              });
+            }
+          }
         }
       }
       saveDb(db);
@@ -868,6 +912,14 @@ const server = http.createServer(async (req, res) => {
           vy.cont_40f = Math.max(0, Number(vy.cont_40f || 0) - Number(bk.cont_40f || 0));
           vy.total_teus = Math.max(0, Number(vy.total_teus || 0) - Number(bk.total_teus || 0));
         }
+        db.voyageContainers = db.voyageContainers.filter(
+          (c) =>
+            !(
+              c.voyage_id === bk.voyage_id &&
+              c.booking_no === bk.booking_no &&
+              String(c.container_no || '').trim() === ''
+            ),
+        );
         bk.voyage_id = null;
         bk.status = 'PENDING';
         bk.updated_at = nowIso();
@@ -894,6 +946,9 @@ const server = http.createServer(async (req, res) => {
           releasedCount++;
         }
       }
+      db.voyageContainers = db.voyageContainers.filter(
+        (c) => !(c.voyage_id === vy.id && String(c.container_no || '').trim() === ''),
+      );
       const hasContainers = db.voyageContainers.some((c) => c.voyage_id === vy.id);
       if (!hasContainers) {
         db.voyages = db.voyages.filter((v) => v.id !== vy.id);
@@ -993,6 +1048,46 @@ const server = http.createServer(async (req, res) => {
         created_at: nowIso(),
       };
       db.voyages.unshift(vy);
+      if (total_teus > 0) {
+        const vessel = db.vessels.find((v) => v.id === vy.vessel_id);
+        const cust = db.customers.find((c) => c.id === vy.customer_id);
+        const op = db.ports.find((pt) => pt.id === vy.origin_port_id);
+        const dp = db.ports.find((pt) => pt.id === vy.destination_port_id);
+        const depDate = String(vy.received_date || nowIso()).slice(0, 10);
+        const accMonth = depDate.slice(0, 7);
+        for (const [ct, cnt] of [
+          ['20E', vy.cont_20e],
+          ['20F', vy.cont_20f],
+          ['40E', vy.cont_40e],
+          ['40F', vy.cont_40f],
+        ]) {
+          for (let i = 0; i < cnt; i++) {
+            db.voyageContainers.push({
+              id: uuid(),
+              voyage_id: vy.id,
+              barge_code: vessel?.code || vessel?.name || '',
+              trip_no: vy.voyage_no || '',
+              container_no: '',
+              seal_no: null,
+              booking_no: null,
+              origin_name: op?.name || '',
+              destination_name: dp?.name || '',
+              shipper_name: cust?.name || '',
+              departure_date: depDate,
+              accounting_month: accMonth,
+              status: vy.status || 'PLANNED',
+              cont_type: ct,
+              unit_price: 0,
+              baf: 0,
+              total_amount: 0,
+              fuel_price_no_vat: 0,
+              notes: null,
+              created_at: nowIso(),
+              updated_at: nowIso(),
+            });
+          }
+        }
+      }
       saveDb(db);
       return send(res, 201, hydrateVoyage(db, vy));
     }
@@ -1028,7 +1123,7 @@ const server = http.createServer(async (req, res) => {
       const inserted = [];
       for (const r of Array.isArray(body.rows) ? body.rows : []) {
         const norm = normalizeContainerPayload(r);
-        if (!norm.container_no) continue;
+        if (!norm.container_no && !norm.cont_type) continue;
         const row = {
           id: uuid(),
           voyage_id: vyBulkMatch[1],

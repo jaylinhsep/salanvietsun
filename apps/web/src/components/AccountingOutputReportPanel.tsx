@@ -30,9 +30,10 @@ export function AccountingOutputReportPanel() {
   const [filterTrip, setFilterTrip] = useState<string>('');
   const [filterShipper, setFilterShipper] = useState<string>('');
 
-  // Inline Price Editing (Accounting only)
+  // Inline Price & Container No Editing (Accounting / Dispatch)
   const [editingId, setEditingId] = useState<string | null>(null);
   const [priceForm, setPriceForm] = useState({
+    container_no: '',
     unit_price: 0,
     baf: 0,
     total_amount: 0,
@@ -78,8 +79,11 @@ export function AccountingOutputReportPanel() {
   const filteredAndSorted = useMemo(() => {
     const filtered = rows.filter((r) => {
       const dep = (r.departure_date || '').slice(0, 10);
-      const accMonth = ((r as any).accounting_month || dep).slice(0, 7);
-      if (filterMonth && accMonth !== filterMonth && !dep.startsWith(filterMonth)) return false;
+      const rawAccMonth = (r as any).accounting_month ? String((r as any).accounting_month).slice(0, 7) : '';
+      const accMonth = rawAccMonth || dep.slice(0, 7);
+      if (filterMonth) {
+        if (rawAccMonth ? accMonth !== filterMonth : !dep.startsWith(filterMonth)) return false;
+      }
       if (filterBarge && (r.barge_code || '') !== filterBarge) return false;
       if (
         filterTrip &&
@@ -155,6 +159,7 @@ export function AccountingOutputReportPanel() {
   const startEdit = (r: VoyageContainer) => {
     setEditingId(r.id);
     setPriceForm({
+      container_no: r.container_no || '',
       unit_price: Number(r.unit_price || 0),
       baf: Number(r.baf || 0),
       total_amount: Number(r.total_amount || 0),
@@ -541,7 +546,18 @@ export function AccountingOutputReportPanel() {
                           isDup ? 'bg-rose-200 text-rose-900' : 'text-navy-900'
                         }`}
                       >
-                        {r.container_no}
+                        {isEditing ? (
+                          <input
+                            className="w-28 border rounded px-1.5 py-1 bg-white text-xs font-mono uppercase"
+                            placeholder="Để trống nếu chưa có"
+                            value={priceForm.container_no}
+                            onChange={(e) =>
+                              setPriceForm({ ...priceForm, container_no: e.target.value.toUpperCase() })
+                            }
+                          />
+                        ) : (
+                          r.container_no || ''
+                        )}
                       </td>
                       <td className="px-2.5 py-2 border-r border-slate-200">{r.origin_name || '—'}</td>
                       <td className="px-2.5 py-2 border-r border-slate-200">
