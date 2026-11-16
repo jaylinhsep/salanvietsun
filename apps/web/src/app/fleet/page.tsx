@@ -257,7 +257,7 @@ export default function FleetPage() {
             <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-lg">
               <div>
                 <span className="text-slate-500">Trọng tải:</span>{' '}
-                <strong className="text-slate-900">{v.capacity_tons.toLocaleString('vi-VN')} tấn</strong>
+                <strong className="text-slate-900">{Number(v.capacity_tons || 0).toLocaleString('vi-VN')} tấn</strong>
               </div>
               <div>
                 <span className="text-slate-500">Sức chở:</span>{' '}

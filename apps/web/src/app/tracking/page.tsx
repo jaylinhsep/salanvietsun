@@ -112,12 +112,14 @@ export default function TrackingPage() {
                     {v.code} — {v.name}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-600">
-                    {v.lat?.toFixed(4)}, {v.lng?.toFixed(4)}
+                    {v.lat != null && v.lng != null
+                      ? `${Number(v.lat).toFixed(4)}, ${Number(v.lng).toFixed(4)}`
+                      : '—'}
                   </td>
                   <td className="px-4 py-3 text-slate-700">{v.nearby_port || 'Đang trên tuyến sông'}</td>
-                  <td className="px-4 py-3">{v.current_speed_knots} kn</td>
+                  <td className="px-4 py-3">{Number(v.current_speed_knots || 0)} kn</td>
                   <td className="px-4 py-3 font-semibold text-slate-900">
-                    {v.current_fuel_liters.toLocaleString('vi-VN')} L
+                    {Number(v.current_fuel_liters || 0).toLocaleString('vi-VN')} L
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={v.status} />

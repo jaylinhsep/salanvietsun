@@ -25,7 +25,7 @@ export default function MobileProfilePage() {
         <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50 p-3 rounded-xl">
           <div>
             <div className="text-slate-500">Trọng tải</div>
-            <div className="font-semibold">{vessel.capacity_tons.toLocaleString('vi-VN')} tấn</div>
+            <div className="font-semibold">{Number(vessel.capacity_tons || 0).toLocaleString('vi-VN')} tấn</div>
           </div>
           <div>
             <div className="text-slate-500">Sức chở</div>

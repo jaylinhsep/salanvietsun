@@ -101,8 +101,8 @@ export function MapView({ vessels, ports = [], voyages = [], heightClass = 'h-[4
               <div style="font-weight:700;font-size:13px;color:#0f172a">${v.name} (${v.code})</div>
               <div style="font-size:12px;margin-top:4px">
                 <div>Thuyền trưởng: <b>${v.captain_name || 'N/A'}</b></div>
-                <div>Tốc độ: <b>${v.current_speed_knots} hải lý/h</b></div>
-                <div>Dầu tồn (ROB): <b>${v.current_fuel_liters.toLocaleString('vi-VN')} lít</b></div>
+                <div>Tốc độ: <b>${Number(v.current_speed_knots || 0)} hải lý/h</b></div>
+                <div>Dầu tồn (ROB): <b>${Number(v.current_fuel_liters || 0).toLocaleString('vi-VN')} lít</b></div>
                 ${v.nearby_port ? `<div style="color:#0284c7">Vùng cảng: ${v.nearby_port}</div>` : ''}
               </div>
             </div>`,

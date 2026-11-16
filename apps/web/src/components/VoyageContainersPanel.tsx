@@ -494,7 +494,7 @@ export function VoyageContainersPanel({
       </div>
 
       {/* KPI Summary Strip */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-3">
           <div className="text-[11px] uppercase text-slate-500 font-medium">Tổng số Cont</div>
           <div className="text-xl font-bold text-slate-900 mt-0.5">{rows.length}</div>
