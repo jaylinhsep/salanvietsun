@@ -14,7 +14,7 @@ if [ -z "$CHANGED_FILES" ] && [ "$1" != "--force" ]; then
   exit 0
 fi
 
-if echo "$CHANGED_FILES" | grep -q "^apps/api/" || [ "$1" = "--force" ]; then
+if echo "$CHANGED_FILES" | grep -q "^apps/api/" || [ "$1" = "--force" ] || [ "$1" = "--api-only" ]; then
   echo "=== 2. Building Backend (NestJS) ==="
   cd apps/api
   if echo "$CHANGED_FILES" | grep -q "apps/api/package"; then
@@ -27,7 +27,7 @@ if echo "$CHANGED_FILES" | grep -q "^apps/api/" || [ "$1" = "--force" ]; then
   pm2 restart salanvietsun-api
 fi
 
-if echo "$CHANGED_FILES" | grep -q "^apps/web/" || [ "$1" = "--force" ]; then
+if [ "$1" != "--api-only" ] && (echo "$CHANGED_FILES" | grep -q "^apps/web/" || [ "$1" = "--force" ]); then
   echo "=== 3. Building Frontend (Next.js) ==="
   cd apps/web
   if echo "$CHANGED_FILES" | grep -q "apps/web/package"; then
