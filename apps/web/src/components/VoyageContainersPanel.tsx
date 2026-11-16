@@ -423,6 +423,52 @@ export function VoyageContainersPanel({
     setShowPasteModal(true);
   };
 
+  const applyBookingPreset = (
+    bk: Booking,
+    setter: React.Dispatch<React.SetStateAction<DraftRow>>,
+  ) => {
+    const inferredType: ContType =
+      bk.cont_20e > 0 ? '20E' : bk.cont_20f > 0 ? '20F' : bk.cont_40e > 0 ? '40E' : '40F';
+    setter((prev) => ({
+      ...prev,
+      booking_no: bk.booking_no,
+      origin_name: bk.resolved_origin_name || bk.origin_name || prev.origin_name,
+      destination_name: bk.resolved_dest_name || bk.dest_name || prev.destination_name,
+      shipper_name: bk.resolved_customer_name || bk.customer_name || prev.shipper_name,
+      cont_type: inferredType,
+    }));
+  };
+
+  const renderBookingChips = (
+    activeBookingNo: string,
+    setter: React.Dispatch<React.SetStateAction<DraftRow>>,
+  ) => {
+    if (voyageBookings.length === 0) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="text-slate-600 font-semibold">Booking đã ghép vào chuyến:</span>
+        {voyageBookings.map((bk) => {
+          const isActive = activeBookingNo.trim().toUpperCase() === bk.booking_no.toUpperCase();
+          return (
+            <button
+              key={bk.id}
+              type="button"
+              onClick={() => applyBookingPreset(bk, setter)}
+              className={`px-2.5 py-1 rounded-lg border font-semibold transition-colors ${
+                isActive
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                  : 'bg-white text-indigo-800 border-indigo-200 hover:bg-indigo-50'
+              }`}
+              title={`${bk.resolved_customer_name || bk.customer_name || ''} • ${bk.resolved_origin_name || bk.origin_name || ''} → ${bk.resolved_dest_name || bk.dest_name || ''}`}
+            >
+              {bk.booking_no} ({bk.total_teus} TEU • {bk.resolved_customer_name || bk.customer_name || 'KH'})
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   const openManualModal = () => {
     setManualRow({
       ...newRow,
@@ -637,6 +683,11 @@ export function VoyageContainersPanel({
 
       {/* Operations Container Table (No Price Columns, includes SỐ BOOKING after SÀ LAN) */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        {voyageBookings.length > 0 && (
+          <div className="px-4 py-2.5 bg-indigo-50/70 border-b border-indigo-100">
+            {renderBookingChips(newRow.booking_no, setNewRow)}
+          </div>
+        )}
         {duplicateSet.size > 0 && (
           <div className="px-4 py-2 bg-rose-50 border-b border-rose-200 text-xs text-rose-700 font-medium">
             Cảnh báo: phát hiện {duplicateSet.size} số container bị trùng lặp (được tô đỏ).
@@ -1070,18 +1121,65 @@ export function VoyageContainersPanel({
             </div>
 
             {/* Defaults applied automatically when pasting a 1-column list of container numbers */}
+            {voyageBookings.length > 0 && (
+              <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl px-3 py-2.5">
+                {renderBookingChips(pasteDefaults.booking_no, setPasteDefaults)}
+              </div>
+            )}
+
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 text-xs">
               <div>
                 <label className="text-[11px] font-semibold text-slate-600">Số Booking</label>
-                <input
-                  list="dl-voyage-bookings"
-                  className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white uppercase font-semibold"
-                  value={pasteDefaults.booking_no}
-                  onChange={(e) =>
-                    setPasteDefaults({ ...pasteDefaults, booking_no: e.target.value.toUpperCase() })
-                  }
-                  placeholder="BK-..."
-                />
+                {voyageBookings.length > 0 ? (
+                  <>
+                    <select
+                      className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white font-semibold"
+                      value={
+                        voyageBookings.some((b) => b.booking_no === pasteDefaults.booking_no)
+                          ? pasteDefaults.booking_no
+                          : '__CUSTOM__'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '__CUSTOM__') {
+                          setPasteDefaults({ ...pasteDefaults, booking_no: '' });
+                          return;
+                        }
+                        const found = voyageBookings.find((b) => b.booking_no === val);
+                        if (found) applyBookingPreset(found, setPasteDefaults);
+                      }}
+                    >
+                      {voyageBookings.map((b) => (
+                        <option key={b.id} value={b.booking_no}>
+                          {b.booking_no} ({b.total_teus}T)
+                        </option>
+                      ))}
+                      <option value="__CUSTOM__">-- Nhập tay khác --</option>
+                    </select>
+                    {!voyageBookings.some((b) => b.booking_no === pasteDefaults.booking_no) && (
+                      <input
+                        className="w-full border rounded px-2 py-1 mt-1 bg-white uppercase font-semibold"
+                        value={pasteDefaults.booking_no}
+                        onChange={(e) =>
+                          setPasteDefaults({
+                            ...pasteDefaults,
+                            booking_no: e.target.value.toUpperCase(),
+                          })
+                        }
+                        placeholder="Nhập số Booking..."
+                      />
+                    )}
+                  </>
+                ) : (
+                  <input
+                    className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white uppercase font-semibold"
+                    value={pasteDefaults.booking_no}
+                    onChange={(e) =>
+                      setPasteDefaults({ ...pasteDefaults, booking_no: e.target.value.toUpperCase() })
+                    }
+                    placeholder="BK-..."
+                  />
+                )}
               </div>
               <div>
                 <label className="text-[11px] font-semibold text-slate-600">Loại Cont mặc định</label>
@@ -1242,6 +1340,12 @@ export function VoyageContainersPanel({
               </button>
             </div>
 
+            {voyageBookings.length > 0 && (
+              <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl px-3 py-2.5">
+                {renderBookingChips(manualRow.booking_no, setManualRow)}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
               <div>
                 <label className="text-xs font-medium text-slate-600">Sà lan</label>
@@ -1255,7 +1359,6 @@ export function VoyageContainersPanel({
               <div>
                 <label className="text-xs font-medium text-slate-600">Số Booking</label>
                 <input
-                  list="dl-voyage-bookings"
                   className="w-full border rounded-lg px-3 py-2 mt-1 uppercase font-semibold"
                   value={manualRow.booking_no}
                   onChange={(e) =>
