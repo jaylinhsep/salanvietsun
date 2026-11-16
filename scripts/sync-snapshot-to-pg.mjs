@@ -257,7 +257,7 @@ async function run() {
         vesselIdMap.set(v.id, v.id);
       }
     }
-    const mapV = (id) => (id ? vesselIdMap.get(id) || id : null);
+    const mapV = (id) => (id && vesselIdMap.has(id) ? vesselIdMap.get(id) : null);
 
     // 2. Ports
     const portIdMap = new Map();
@@ -281,7 +281,7 @@ async function run() {
         portIdMap.set(p.id, p.id);
       }
     }
-    const mapP = (id) => (id ? portIdMap.get(id) || id : null);
+    const mapP = (id) => (id && portIdMap.has(id) ? portIdMap.get(id) : null);
 
     // 3. Customers
     const custIdMap = new Map();
@@ -301,7 +301,7 @@ async function run() {
         custIdMap.set(c.id, c.id);
       }
     }
-    const mapC = (id) => (id ? custIdMap.get(id) || id : null);
+    const mapC = (id) => (id && custIdMap.has(id) ? custIdMap.get(id) : null);
 
     // 4. Voyages
     for (const vy of snap.voyages || []) {

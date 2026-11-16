@@ -42393,7 +42393,7 @@
     {
       "id": "332d8030-c7bf-4210-b4ba-7cda070a810c",
       "period_month": "2026-10",
-      "vessel_id": "b2f98ed7-9dbc-49f0-a3f4-e4ec09e88ba8",
+      "vessel_id": null,
       "vessel_code": "CHUNG",
       "vessel_name": "CHUNG",
       "charter_fee": 0,
