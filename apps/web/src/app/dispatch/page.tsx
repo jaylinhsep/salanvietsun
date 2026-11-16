@@ -21,7 +21,7 @@ type TabKey = 'VOYAGES' | 'PORTS' | 'CUSTOMERS';
 
 const EMPTY_VOYAGE_FORM = {
   voyage_no: '',
-  received_date: new Date().toISOString().slice(0, 10),
+  received_date: '',
   pic_name: '',
   customer_id: '',
   vessel_id: '',
@@ -58,10 +58,10 @@ const EMPTY_CUSTOMER_FORM = {
 export default function DispatchPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('VOYAGES');
   const [selectedVoyageId, setSelectedVoyageId] = useState<string | null>(null);
-  const [voyages, setVoyages] = useState<Voyage[]>(FALLBACK_VOYAGES);
-  const [vessels, setVessels] = useState<Vessel[]>(FALLBACK_VESSELS);
-  const [ports, setPorts] = useState<Port[]>(FALLBACK_PORTS);
-  const [customers, setCustomers] = useState<Customer[]>(FALLBACK_CUSTOMERS);
+  const [voyages, setVoyages] = useState<Voyage[]>([]);
+  const [vessels, setVessels] = useState<Vessel[]>([]);
+  const [ports, setPorts] = useState<Port[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
 
   // Voyage modal
   const [showVoyageModal, setShowVoyageModal] = useState(false);
@@ -122,6 +122,7 @@ export default function DispatchPage() {
     setEditingVoyageId(null);
     setVoyageForm({
       ...EMPTY_VOYAGE_FORM,
+      received_date: new Date().toISOString().slice(0, 10),
       voyage_no: `VOY-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
       customer_id: customers[0]?.id || '',
       vessel_id: vessels[0]?.id || '',
