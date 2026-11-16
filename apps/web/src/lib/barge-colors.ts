@@ -6,52 +6,42 @@ export interface BargeColorStyle {
 
 const FIXED_BARGE_STYLES: Record<string, BargeColorStyle> = {
   NV18: {
-    rowClass: 'bg-sky-50/70 hover:bg-sky-100/80',
-    badgeClass: 'bg-sky-100/90 text-sky-900 border border-sky-200',
-    dotClass: 'bg-sky-500',
+    rowClass: 'bg-[#F4F7FB] hover:bg-[#EBF1F8]',
+    badgeClass: 'bg-[#ECF2F9] text-slate-700 border border-[#D7E1EE]',
+    dotClass: 'bg-sky-600/70',
   },
   NV36: {
-    rowClass: 'bg-emerald-50/70 hover:bg-emerald-100/80',
-    badgeClass: 'bg-emerald-100/90 text-emerald-900 border border-emerald-200',
-    dotClass: 'bg-emerald-500',
+    rowClass: 'bg-[#F3F8F5] hover:bg-[#EAF3ED]',
+    badgeClass: 'bg-[#EAF3ED] text-slate-700 border border-[#D4E4DA]',
+    dotClass: 'bg-emerald-600/70',
   },
   NV38: {
-    rowClass: 'bg-amber-50/70 hover:bg-amber-100/80',
-    badgeClass: 'bg-amber-100/90 text-amber-900 border border-amber-200',
-    dotClass: 'bg-amber-500',
+    rowClass: 'bg-[#FAF7F2] hover:bg-[#F3EFE6]',
+    badgeClass: 'bg-[#F4EFE6] text-slate-700 border border-[#E5DCCB]',
+    dotClass: 'bg-amber-600/70',
   },
 };
 
 const PALETTE_STYLES: BargeColorStyle[] = [
   {
-    rowClass: 'bg-violet-50/70 hover:bg-violet-100/80',
-    badgeClass: 'bg-violet-100/90 text-violet-900 border border-violet-200',
-    dotClass: 'bg-violet-500',
+    rowClass: 'bg-[#F6F5FA] hover:bg-[#EEEBF4]',
+    badgeClass: 'bg-[#EFECF6] text-slate-700 border border-[#DED9EC]',
+    dotClass: 'bg-indigo-500/60',
   },
   {
-    rowClass: 'bg-teal-50/70 hover:bg-teal-100/80',
-    badgeClass: 'bg-teal-100/90 text-teal-900 border border-teal-200',
-    dotClass: 'bg-teal-500',
+    rowClass: 'bg-[#F4F6F6] hover:bg-[#EBF0F0]',
+    badgeClass: 'bg-[#ECEFEF] text-slate-700 border border-[#D8E0E0]',
+    dotClass: 'bg-teal-600/60',
   },
   {
-    rowClass: 'bg-indigo-50/70 hover:bg-indigo-100/80',
-    badgeClass: 'bg-indigo-100/90 text-indigo-900 border border-indigo-200',
-    dotClass: 'bg-indigo-500',
+    rowClass: 'bg-[#F7F6F4] hover:bg-[#EFECE8]',
+    badgeClass: 'bg-[#F0EEEA] text-slate-700 border border-[#E1DDD5]',
+    dotClass: 'bg-stone-500/70',
   },
   {
-    rowClass: 'bg-orange-50/70 hover:bg-orange-100/80',
-    badgeClass: 'bg-orange-100/90 text-orange-900 border border-orange-200',
-    dotClass: 'bg-orange-500',
-  },
-  {
-    rowClass: 'bg-cyan-50/70 hover:bg-cyan-100/80',
-    badgeClass: 'bg-cyan-100/90 text-cyan-900 border border-cyan-200',
-    dotClass: 'bg-cyan-500',
-  },
-  {
-    rowClass: 'bg-fuchsia-50/60 hover:bg-fuchsia-100/75',
-    badgeClass: 'bg-fuchsia-100/90 text-fuchsia-900 border border-fuchsia-200',
-    dotClass: 'bg-fuchsia-500',
+    rowClass: 'bg-[#F5F7FA] hover:bg-[#ECEFF5]',
+    badgeClass: 'bg-[#EDEFF5] text-slate-700 border border-[#DCE0EA]',
+    dotClass: 'bg-slate-500/70',
   },
 ];
 
