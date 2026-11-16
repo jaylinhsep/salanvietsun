@@ -78,6 +78,12 @@ export default function DispatchPage() {
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [customerForm, setCustomerForm] = useState(EMPTY_CUSTOMER_FORM);
 
+  // Filters for Voyages list
+  const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [filterVesselId, setFilterVesselId] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [visibleLimit, setVisibleLimit] = useState<number>(80);
+
   const loadAll = () => {
     fetchApi<Voyage[]>('/dispatch/voyages', FALLBACK_VOYAGES).then((r) => setVoyages(r.data));
     fetchApi<Vessel[]>('/fleet/vessels', FALLBACK_VESSELS).then((r) => setVessels(r.data));
@@ -282,7 +288,18 @@ export default function DispatchPage() {
     }
   };
 
-  const sumTeus = voyages.reduce((acc, vy) => acc + Number(vy.total_teus || 0), 0);
+  const filteredVoyages = voyages.filter((vy) => {
+    if (filterStatus !== 'ALL' && vy.status !== filterStatus) return false;
+    if (filterVesselId && vy.vessel_id !== filterVesselId) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const hay = `${vy.voyage_no} ${vy.vessel_name} ${vy.customer_name || ''} ${vy.booking_nos || ''} ${vy.origin_name || ''} ${vy.dest_name || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const sumTeus = filteredVoyages.reduce((acc, vy) => acc + Number(vy.total_teus || 0), 0);
 
   return (
     <div className="space-y-5">
@@ -374,11 +391,41 @@ export default function DispatchPage() {
 
       {activeTab === 'VOYAGES' && !selectedVoyage && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700">
-              Bảng theo dõi điều độ sà lan & sản lượng TEU (bấm vào từng chuyến để nhập/xem chi tiết từng container)
+          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                placeholder="Tìm mã chuyến, booking, khách hàng..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-xs w-60"
+              />
+              <select
+                value={filterVesselId}
+                onChange={(e) => setFilterVesselId(e.target.value)}
+                className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-xs"
+              >
+                <option value="">Tất cả Sà lan ({vessels.length})</option>
+                {vessels.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name} ({v.code})
+                  </option>
+                ))}
+              </select>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-xs"
+              >
+                <option value="ALL">Tất cả trạng thái ({voyages.length})</option>
+                <option value="COMPLETED">Đã hoàn thành</option>
+                <option value="PLANNED">Đã lập kế hoạch / Đang gom</option>
+                <option value="IN_TRANSIT">Đang vận chuyển</option>
+              </select>
+            </div>
+            <span className="font-bold text-rose-600 text-sm">
+              {filteredVoyages.length} chuyến • Tổng sản lượng: {sumTeus} TEUs
             </span>
-            <span className="font-bold text-rose-600 text-sm">Tổng sản lượng: {sumTeus} TEUs</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left whitespace-nowrap">
@@ -403,7 +450,7 @@ export default function DispatchPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {voyages.map((vy) => (
+                {filteredVoyages.slice(0, visibleLimit).map((vy) => (
                   <tr
                     key={vy.id}
                     onClick={() => selectVoyage(vy.id)}
@@ -418,6 +465,11 @@ export default function DispatchPage() {
                       <div className="text-[10px] font-normal text-slate-500 no-underline">
                         {vy.detail_count ? `${vy.detail_count} cont chi tiết` : 'Chưa nhập chi tiết'}
                       </div>
+                      {vy.booking_nos && (
+                        <div className="text-[10px] font-normal text-indigo-600 no-underline max-w-[160px] truncate" title={vy.booking_nos}>
+                          BK: {vy.booking_nos}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5">{vy.pic_name || '—'}</td>
                     <td className="px-3 py-2.5 font-medium text-slate-900">
@@ -480,6 +532,25 @@ export default function DispatchPage() {
               </tbody>
             </table>
           </div>
+          {filteredVoyages.length > visibleLimit && (
+            <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600">
+              <span>Đang hiển thị {Math.min(visibleLimit, filteredVoyages.length)} / {filteredVoyages.length} chuyến</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setVisibleLimit((v) => v + 100)}
+                  className="px-3 py-1 rounded border border-slate-300 bg-white font-medium hover:bg-slate-100"
+                >
+                  Xem thêm 100 chuyến
+                </button>
+                <button
+                  onClick={() => setVisibleLimit(filteredVoyages.length)}
+                  className="px-3 py-1 rounded bg-navy-900 text-white font-medium hover:bg-navy-800"
+                >
+                  Hiện tất cả ({filteredVoyages.length})
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

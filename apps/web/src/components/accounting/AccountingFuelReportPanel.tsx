@@ -206,9 +206,18 @@ export function AccountingFuelReportPanel({ vessels }: { vessels: Vessel[] }) {
               ) : rows.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50">
                   <td className="px-3 py-2 text-slate-600">{r.entry_date || r.period_month}</td>
-                  <td className="px-3 py-2 font-semibold text-navy-900">{r.vessel_code}</td>
+                  <td className="px-3 py-2 font-semibold text-navy-900">
+                    {r.vessel_name || r.vessel_code}
+                  </td>
                   <td className="px-3 py-2 text-xs">{ENTRY_LABELS[r.entry_type]}</td>
-                  <td className="px-3 py-2 text-slate-700">{r.route_label || r.notes || '—'}</td>
+                  <td className="px-3 py-2 text-slate-700">
+                    <div>{r.route_label || r.notes || '—'}</div>
+                    {(r as any).linked_trip_no && (
+                      <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 text-[10px] font-semibold">
+                        Link: {(r as any).linked_trip_no}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums text-sky-700 font-medium">{r.liters_bunkered ? formatMoney(r.liters_bunkered) : '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-amber-700 font-medium">{r.liters_consumed ? formatMoney(r.liters_consumed) : '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{r.unit_price ? formatMoney(r.unit_price) : '—'}</td>

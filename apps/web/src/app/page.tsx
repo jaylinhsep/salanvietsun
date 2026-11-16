@@ -57,6 +57,7 @@ export default function DispatchCenterHomePage() {
   const [mapVesselId, setMapVesselId] = useState<string | null>(null);
   const [overviewVoyageId, setOverviewVoyageId] = useState<string | null>(null);
   const [onlyUrgent, setOnlyUrgent] = useState(false);
+  const [showVendorBarges, setShowVendorBarges] = useState(false);
 
   // Quick Create / Edit Booking Modal
   const [showCreateBooking, setShowCreateBooking] = useState(false);
@@ -348,8 +349,11 @@ export default function DispatchCenterHomePage() {
       IN_VOYAGE: 3,
       MAINTENANCE: 4,
     };
-    return [...vessels].sort((a, b) => (order[a.status] || 9) - (order[b.status] || 9));
-  }, [vessels]);
+    const base = showVendorBarges
+      ? vessels
+      : vessels.filter((v) => !(v as any).is_vendor_barge);
+    return [...base].sort((a, b) => (order[a.status] || 9) - (order[b.status] || 9));
+  }, [vessels, showVendorBarges]);
 
   const bargeStageBadge = (vessel: Vessel, activeVoyage?: Voyage) => {
     if (vessel.status === 'MAINTENANCE') {
@@ -634,7 +638,7 @@ export default function DispatchCenterHomePage() {
           <div className="bg-white rounded-xl border border-slate-200 px-4 py-3 shadow-sm flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="font-bold text-sm text-slate-900">
-                2. Đội Sà lan theo trạng thái ({vessels.length} tàu)
+                2. Đội Sà lan theo trạng thái ({groupedVessels.length}/{vessels.length} tàu)
               </h2>
               <p className="text-[11px] text-slate-500">
                 {selectedBookings.length > 0
@@ -642,14 +646,29 @@ export default function DispatchCenterHomePage() {
                   : 'Chọn Booking ở cột trái để ghép 1 chạm, hoặc bấm Chi tiết Cont / Vị trí AIS trên từng tàu'}
               </p>
             </div>
-            {selectedBookings.length > 0 && (
-              <button
-                onClick={() => setSelectedBookingIds([])}
-                className="text-xs px-2.5 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50"
-              >
-                Bỏ chọn ({selectedBookings.length})
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {vessels.some((v) => (v as any).is_vendor_barge) && (
+                <button
+                  type="button"
+                  onClick={() => setShowVendorBarges((s) => !s)}
+                  className={`text-xs px-2.5 py-1 rounded border ${
+                    showVendorBarges
+                      ? 'bg-navy-900 text-white border-navy-900'
+                      : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {showVendorBarges ? 'Ẩn tàu thuê ngoài' : `+ Tàu thuê ngoài (${vessels.length})`}
+                </button>
+              )}
+              {selectedBookings.length > 0 && (
+                <button
+                  onClick={() => setSelectedBookingIds([])}
+                  className="text-xs px-2.5 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50"
+                >
+                  Bỏ chọn ({selectedBookings.length})
+                </button>
+              )}
+            </div>
           </div>
 
           <div
