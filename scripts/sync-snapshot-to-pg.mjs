@@ -218,8 +218,8 @@ async function ensureSchema(client) {
 async function run() {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
     await ensureSchema(client);
+    await client.query('BEGIN');
 
     // 1. Vessels (map code -> existing or new ID)
     const vesselIdMap = new Map();

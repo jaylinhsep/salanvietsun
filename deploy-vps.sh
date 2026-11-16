@@ -23,6 +23,7 @@ if echo "$CHANGED_FILES" | grep -q "^apps/api/" || [ "$1" = "--force" ] || [ "$1
   npm run build
   cd ../..
   echo "=== 2b. Syncing schema & snapshot data to PostgreSQL ==="
+  pm2 stop salanvietsun-api >/dev/null 2>&1 || true
   node scripts/sync-snapshot-to-pg.mjs
   pm2 restart salanvietsun-api
 fi
