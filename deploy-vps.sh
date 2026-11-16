@@ -9,8 +9,8 @@ git pull origin main
 NEW_COMMIT=$(git rev-parse HEAD)
 CHANGED_FILES=$(git diff --name-only "$PREV_COMMIT" "$NEW_COMMIT" || true)
 
-if [ -z "$CHANGED_FILES" ] && [ "$1" != "--force" ]; then
-  echo "No new changes. Use 'bash deploy-vps.sh --force' to force rebuild."
+if [ -z "$CHANGED_FILES" ] && [ "$1" != "--force" ] && [ "$1" != "--api-only" ]; then
+  echo "No new changes. Use 'bash deploy-vps.sh --force' or '--api-only' to rebuild."
   exit 0
 fi
 
