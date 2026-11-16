@@ -16,6 +16,7 @@ import {
 } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
 import { VoyageContainersPanel } from '@/components/VoyageContainersPanel';
+import { getBargeColorStyle } from '@/lib/barge-colors';
 
 type TabKey = 'VOYAGES' | 'PORTS' | 'CUSTOMERS';
 
@@ -578,11 +579,12 @@ export default function DispatchPage() {
                 ) : (
                   filteredVoyages.slice(0, visibleLimit).map((vy) => {
                     const displayDate = getVoyageDate(vy);
+                    const bargeStyle = getBargeColorStyle(vy.vessel_code || vy.vessel_name);
                     return (
                       <tr
                         key={vy.id}
                         onClick={() => selectVoyage(vy.id)}
-                        className="hover:bg-sky-50/60 cursor-pointer align-top"
+                        className={`${bargeStyle.rowClass} cursor-pointer align-top transition-colors`}
                         title="Bấm để xem hoặc nhập chi tiết container của chuyến này"
                       >
                         <td className="px-2.5 py-2 text-slate-700 whitespace-nowrap">
@@ -628,7 +630,16 @@ export default function DispatchPage() {
                           )}
                         </td>
                         <td className="px-2.5 py-2 font-semibold text-slate-800 leading-snug">
-                          {vy.vessel_name || 'Chưa gán'}
+                          {vy.vessel_name ? (
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-semibold ${bargeStyle.badgeClass}`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${bargeStyle.dotClass}`} />
+                              {vy.vessel_name}
+                            </span>
+                          ) : (
+                            'Chưa gán'
+                          )}
                         </td>
                         <td className="px-2.5 py-2 font-medium text-slate-900 leading-snug">
                           {vy.customer_code ? vy.customer_code : vy.customer_name || '—'}

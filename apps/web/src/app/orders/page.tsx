@@ -35,6 +35,7 @@ import {
   updateSettlementAction,
 } from '@/lib/workflow-store';
 import { StatusBadge } from '@/components/StatusBadge';
+import { getBargeColorStyle } from '@/lib/barge-colors';
 import { AccountingOutputReportPanel } from '@/components/AccountingOutputReportPanel';
 import { AccountingPnlSummaryPanel } from '@/components/accounting/AccountingPnlSummaryPanel';
 import { AccountingPortAndFixedPanel } from '@/components/accounting/AccountingPortAndFixedPanel';
@@ -431,9 +432,10 @@ export default function SettlementAndOrdersPage() {
                   {filteredVoyages.map((vy) => {
                     const pnl = computeVoyagePnl(vy);
                     const isEditing = editingVoyageId === vy.id;
+                    const bargeStyle = getBargeColorStyle(vy.vessel_code || vy.vessel_name);
 
                     return (
-                      <tr key={vy.id} className="hover:bg-slate-50">
+                      <tr key={vy.id} className={`${bargeStyle.rowClass} transition-colors`}>
                         <td className="px-3 py-2.5">
                           <Link
                             href={`/dispatch?voyageId=${vy.id}`}

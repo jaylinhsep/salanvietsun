@@ -13,6 +13,7 @@ import {
   type ContType,
   type VoyageContainer,
 } from '@/lib/api';
+import { getBargeColorStyle } from '@/lib/barge-colors';
 
 const CONT_TYPES: ContType[] = ['20E', '20F', '40E', '40F'];
 
@@ -531,9 +532,10 @@ export function AccountingOutputReportPanel() {
                 filteredAndSorted.slice(0, visibleLimit).map((r, idx) => {
                   const isEditing = editingId === r.id;
                   const isDup = duplicateSet.has((r.container_no || '').trim().toUpperCase());
+                  const bargeStyle = getBargeColorStyle(r.barge_code);
 
                   return (
-                    <tr key={r.id} className={isEditing ? 'bg-amber-50/70' : 'hover:bg-slate-50'}>
+                    <tr key={r.id} className={isEditing ? 'bg-amber-50/70' : `${bargeStyle.rowClass} transition-colors`}>
                       <td className="px-2 py-2 border-r border-slate-200 text-center text-slate-500">
                         {idx + 1}
                       </td>
