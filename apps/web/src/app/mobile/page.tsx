@@ -18,18 +18,15 @@ import {
   CAPTAIN_STEPS,
   compressImageToDataUrl,
   getOfflineCaptainQueue,
-  loadWorkflowSnapshot,
   submitCaptainStepAction,
   syncOfflineCaptainQueue,
 } from '@/lib/workflow-store';
+import { CAPTAIN_SESSION_EVENT, fetchCaptainWorkspace } from '@/lib/captain-auth';
 import { StatusBadge } from '@/components/StatusBadge';
-
-const SELECTED_VESSEL_KEY = 'vietsun_mobile_selected_vessel_v1';
 
 export default function MobileCaptainHomePage() {
   const [vessels, setVessels] = useState<Vessel[]>([]);
   const [voyages, setVoyages] = useState<Voyage[]>([]);
-  const [selectedVesselId, setSelectedVesselId] = useState<string>('');
 
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [simulateOffline, setSimulateOffline] = useState<boolean>(false);
@@ -50,23 +47,15 @@ export default function MobileCaptainHomePage() {
   const effectiveOffline = !isOnline || simulateOffline;
 
   const refreshAll = async () => {
-    const snap = await loadWorkflowSnapshot();
-    setVessels(snap.vessels);
-    setVoyages(snap.voyages);
-    setQueueCount(getOfflineCaptainQueue().length);
-
-    if (!selectedVesselId && snap.vessels.length > 0) {
-      const saved =
-        typeof window !== 'undefined' ? localStorage.getItem(SELECTED_VESSEL_KEY) : null;
-      const initial =
-        snap.vessels.find((v) => v.id === saved || v.code === saved) ||
-        snap.vessels.find((v) =>
-          snap.voyages.some(
-            (vy) => vy.vessel_id === v.id && ['PLANNED', 'IN_TRANSIT', 'ARRIVED'].includes(vy.status),
-          ),
-        ) ||
-        snap.vessels[0];
-      if (initial) setSelectedVesselId(initial.id);
+    try {
+      const ws = await fetchCaptainWorkspace();
+      setVessels(ws.vessel ? [ws.vessel] : []);
+      setVoyages(ws.voyages || []);
+      setQueueCount(getOfflineCaptainQueue().length);
+    } catch (err: any) {
+      if (err?.message !== 'UNAUTHENTICATED') {
+        setStatusMessage(err?.message || 'Không tải được dữ liệu tàu.');
+      }
     }
   };
 
@@ -85,21 +74,21 @@ export default function MobileCaptainHomePage() {
         }
       };
       const handleOffline = () => setIsOnline(false);
+      const handleSessionChange = () => refreshAll();
       window.addEventListener('online', handleOnline);
       window.addEventListener('offline', handleOffline);
+      window.addEventListener(CAPTAIN_SESSION_EVENT, handleSessionChange);
       refreshAll();
       return () => {
         window.removeEventListener('online', handleOnline);
         window.removeEventListener('offline', handleOffline);
+        window.removeEventListener(CAPTAIN_SESSION_EVENT, handleSessionChange);
       };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const vessel = useMemo(
-    () => vessels.find((v) => v.id === selectedVesselId) || vessels[0] || null,
-    [vessels, selectedVesselId],
-  );
+  const vessel = vessels[0] || null;
 
   // Focus ONLY 1 active voyage on current barge
   const activeVoyage = useMemo(() => {
@@ -265,7 +254,7 @@ export default function MobileCaptainHomePage() {
         )}
       </div>
 
-      {/* Barge Selector (sticky for Captain) */}
+      {/* Assigned Barge Card (strictly locked to Captain account) */}
       <div className="bg-white rounded-2xl p-3.5 border border-slate-200 shadow-sm space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -274,22 +263,11 @@ export default function MobileCaptainHomePage() {
           </div>
           {vessel && <StatusBadge status={vessel.status} />}
         </div>
-        <select
-          className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 bg-slate-50"
-          value={selectedVesselId}
-          onChange={(e) => {
-            setSelectedVesselId(e.target.value);
-            if (typeof window !== 'undefined') {
-              localStorage.setItem(SELECTED_VESSEL_KEY, e.target.value);
-            }
-          }}
-        >
-          {vessels.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name} ({v.code}) — Dầu: {Number(v.current_fuel_liters || 0).toLocaleString('vi-VN')} L
-            </option>
-          ))}
-        </select>
+        <div className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-900 bg-slate-50">
+          {vessel
+            ? `${vessel.name} (${vessel.code}) — Dầu: ${Number(vessel.current_fuel_liters || 0).toLocaleString('vi-VN')} L`
+            : 'Đang tải thông tin sà lan...'}
+        </div>
       </div>
 
       {/* Single Active Voyage Focus Card */}

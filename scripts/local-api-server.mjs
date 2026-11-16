@@ -120,14 +120,146 @@ function defaultSeedDb() {
   };
 }
 
+const CAPTAIN_TOKEN_SECRET = process.env.CAPTAIN_AUTH_SECRET || 'vietsun-captain-secret-2026-hmac';
+const CAPTAIN_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const DEFAULT_CAPTAIN_SEEDS = [
+  {
+    username: 'nv18',
+    password: process.env.CAPTAIN_NV18_PASSWORD || 'nv18@2026',
+    full_name: 'Thuyền trưởng NHẬT VIỆT 18',
+    vessel_code: 'NV18',
+  },
+  {
+    username: 'nv36',
+    password: process.env.CAPTAIN_NV36_PASSWORD || 'nv36@2026',
+    full_name: 'Thuyền trưởng NHẬT VIỆT 36',
+    vessel_code: 'NV36',
+  },
+  {
+    username: 'nv38',
+    password: process.env.CAPTAIN_NV38_PASSWORD || 'nv38@2026',
+    full_name: 'Thuyền trưởng NHẬT VIỆT 38',
+    vessel_code: 'NV38',
+  },
+];
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(password, salt, 32).toString('hex');
+  return `${salt}:${derived}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [salt, expectedHex] = String(storedHash || '').split(':');
+  if (!salt || !expectedHex) return false;
+  const derived = crypto.scryptSync(password, salt, 32);
+  const expected = Buffer.from(expectedHex, 'hex');
+  if (derived.length !== expected.length) return false;
+  return crypto.timingSafeEqual(derived, expected);
+}
+
+function signCaptainToken(user) {
+  const payload = {
+    sub: user.id,
+    username: user.username,
+    full_name: user.full_name,
+    vessel_code: user.vessel_code,
+    role: user.role || 'CAPTAIN',
+    exp: Date.now() + CAPTAIN_TOKEN_TTL_MS,
+  };
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', CAPTAIN_TOKEN_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
+function ensureCaptainAccounts(db) {
+  if (!Array.isArray(db.captainAccounts)) db.captainAccounts = [];
+  let changed = false;
+  for (const seed of DEFAULT_CAPTAIN_SEEDS) {
+    if (!db.captainAccounts.some((a) => a.username === seed.username)) {
+      db.captainAccounts.push({
+        id: uuid(),
+        username: seed.username,
+        password_hash: hashPassword(seed.password),
+        full_name: seed.full_name,
+        vessel_code: seed.vessel_code,
+        role: 'CAPTAIN',
+        is_active: true,
+        created_at: nowIso(),
+      });
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function requireCaptainAuth(req, res, db) {
+  const raw = String(req.headers.authorization || '').trim();
+  if (!raw.toLowerCase().startsWith('bearer ')) {
+    send(res, 401, { message: 'Vui lòng đăng nhập tài khoản Thuyền trưởng.' });
+    return null;
+  }
+  const token = raw.slice(7).trim();
+  const dot = token.indexOf('.');
+  if (dot <= 0) {
+    send(res, 401, { message: 'Token đăng nhập không hợp lệ.' });
+    return null;
+  }
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expectedSig = crypto.createHmac('sha256', CAPTAIN_TOKEN_SECRET).update(body).digest('base64url');
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+    send(res, 401, { message: 'Chữ ký phiên đăng nhập không hợp lệ.' });
+    return null;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+  } catch {
+    send(res, 401, { message: 'Phiên đăng nhập bị lỗi.' });
+    return null;
+  }
+  if (!payload?.username || !payload?.vessel_code || !payload?.exp || Date.now() > Number(payload.exp)) {
+    send(res, 401, { message: 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.' });
+    return null;
+  }
+  const acc = (db.captainAccounts || []).find(
+    (a) => a.username === String(payload.username).trim().toLowerCase(),
+  );
+  if (!acc || acc.is_active === false) {
+    send(res, 401, { message: 'Tài khoản Thuyền trưởng không tồn tại hoặc đã bị khóa.' });
+    return null;
+  }
+  const vessel = (db.vessels || []).find(
+    (v) => String(v.code || '').toUpperCase() === String(acc.vessel_code || '').toUpperCase(),
+  );
+  if (!vessel) {
+    send(res, 403, { message: `Không tìm thấy sà lan được phân công (${acc.vessel_code}).` });
+    return null;
+  }
+  return {
+    captain: {
+      id: acc.id,
+      username: acc.username,
+      full_name: acc.full_name,
+      vessel_code: acc.vessel_code,
+      role: acc.role || 'CAPTAIN',
+    },
+    vessel,
+  };
+}
+
 function loadDb() {
   if (!fs.existsSync(DB_FILE)) {
     const seed = defaultSeedDb();
+    ensureCaptainAccounts(seed);
     fs.writeFileSync(DB_FILE, JSON.stringify(seed, null, 2), 'utf8');
     return seed;
   }
   const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  return {
+  const db = {
     ...parsed,
     accountingFixedCosts: parsed.accountingFixedCosts || [],
     accountingPortExpenses: parsed.accountingPortExpenses || [],
@@ -135,7 +267,12 @@ function loadDb() {
     accountingSupplies: parsed.accountingSupplies || [],
     accountingVendorCosts: parsed.accountingVendorCosts || [],
     accountingHistoricalMonthly: parsed.accountingHistoricalMonthly || [],
+    captainAccounts: parsed.captainAccounts || [],
   };
+  if (ensureCaptainAccounts(db)) {
+    saveDb(db);
+  }
+  return db;
 }
 
 function saveDb(db) {
@@ -1348,56 +1485,192 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, db.maintenance[idx]);
     }
 
-    if (m === 'GET' && p === '/api/mobile/captain-summary') {
-      const vesselCode = url.searchParams.get('vesselCode') || '';
-      const vessel = db.vessels.find((v) => v.code === vesselCode) || db.vessels[0] || null;
-      const activeVoyage = vessel
-        ? db.voyages.find(
-            (vy) =>
-              vy.vessel_id === vessel.id &&
-              ['PLANNED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED'].includes(vy.status),
-          ) || null
-        : null;
+    if (m === 'POST' && p === '/api/mobile/login') {
+      const body = await readBody(req);
+      const username = String(body.username || '').trim().toLowerCase();
+      const password = String(body.password || '');
+      if (!username || !password) {
+        return send(res, 401, { message: 'Vui lòng nhập tên đăng nhập và mật khẩu.' });
+      }
+      const acc = (db.captainAccounts || []).find((a) => a.username === username);
+      if (!acc || acc.is_active === false || !verifyPassword(password, acc.password_hash)) {
+        return send(res, 401, { message: 'Sai tên đăng nhập hoặc mật khẩu.' });
+      }
+      const vessel = (db.vessels || []).find(
+        (v) => String(v.code || '').toUpperCase() === String(acc.vessel_code || '').toUpperCase(),
+      ) || null;
+      const captain = {
+        id: acc.id,
+        username: acc.username,
+        full_name: acc.full_name,
+        vessel_code: acc.vessel_code,
+        role: acc.role || 'CAPTAIN',
+      };
+      return send(res, 200, { token: signCaptainToken(captain), captain, vessel });
+    }
+
+    if (m === 'GET' && p === '/api/mobile/workspace') {
+      const auth = requireCaptainAuth(req, res, db);
+      if (!auth) return;
+      const voyages = (db.voyages || [])
+        .filter((vy) => vy.vessel_id === auth.vessel.id)
+        .sort((a, b) =>
+          String(b.received_date || b.created_at || '').localeCompare(
+            String(a.received_date || a.created_at || ''),
+          ),
+        )
+        .slice(0, 60)
+        .map((vy) => hydrateVoyage(db, vy));
+      const fuelLogs = (db.fuelLogs || []).filter((fl) => fl.vessel_id === auth.vessel.id);
+      const maintenanceOrders = (db.maintenance || []).filter(
+        (mt) => mt.vessel_id === auth.vessel.id,
+      );
       return send(res, 200, {
-        vessel,
+        captain: auth.captain,
+        vessel: auth.vessel,
+        voyages,
+        fuelLogs,
+        maintenanceOrders,
+      });
+    }
+
+    if (m === 'GET' && p === '/api/mobile/captain-summary') {
+      const auth = requireCaptainAuth(req, res, db);
+      if (!auth) return;
+      const activeVoyage =
+        db.voyages.find(
+          (vy) =>
+            vy.vessel_id === auth.vessel.id &&
+            ['PLANNED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED'].includes(vy.status),
+        ) || null;
+      return send(res, 200, {
+        captain: auth.captain,
+        vessel: auth.vessel,
         activeVoyage: activeVoyage ? hydrateVoyage(db, activeVoyage) : null,
       });
     }
 
-    if (m === 'POST' && p === '/api/mobile/step') {
+    if (m === 'POST' && p === '/api/mobile/fuel') {
+      const auth = requireCaptainAuth(req, res, db);
+      if (!auth) return;
       const body = await readBody(req);
+      if (body.vessel_id && body.vessel_id !== auth.vessel.id) {
+        return send(res, 403, { message: 'Không được phép nhập dầu cho sà lan khác.' });
+      }
+      if (body.voyage_id) {
+        const vy = db.voyages.find((x) => x.id === body.voyage_id);
+        if (!vy || vy.vessel_id !== auth.vessel.id) {
+          return send(res, 403, { message: 'Chuyến không thuộc sà lan của bạn.' });
+        }
+      }
+      const qty = Number(body.quantity_liters || 0);
+      const log = {
+        id: uuid(),
+        ...body,
+        vessel_id: auth.vessel.id,
+        vessel_code: auth.vessel.code || '',
+        vessel_name: auth.vessel.name || '',
+        reported_by: body.reported_by || auth.captain.full_name,
+        logged_at: nowIso(),
+      };
+      db.fuelLogs.unshift(log);
+      if (body.log_type === 'BUNKERING') {
+        auth.vessel.current_fuel_liters = Number(auth.vessel.current_fuel_liters || 0) + qty;
+      } else if (body.log_type === 'CONSUMPTION') {
+        auth.vessel.current_fuel_liters = Math.max(0, Number(auth.vessel.current_fuel_liters || 0) - qty);
+      } else if (body.log_type === 'ROB') {
+        auth.vessel.current_fuel_liters = qty;
+      }
+      saveDb(db);
+      return send(res, 201, log);
+    }
+
+    if (m === 'POST' && p === '/api/mobile/maintenance') {
+      const auth = requireCaptainAuth(req, res, db);
+      if (!auth) return;
+      const body = await readBody(req);
+      if (body.vessel_id && body.vessel_id !== auth.vessel.id) {
+        return send(res, 403, { message: 'Không được phép báo sự cố cho sà lan khác.' });
+      }
+      const ticket = {
+        id: uuid(),
+        ticket_no: `MNT-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
+        ...body,
+        vessel_id: auth.vessel.id,
+        vessel_code: auth.vessel.code || '',
+        vessel_name: auth.vessel.name || '',
+        reported_by: body.reported_by || auth.captain.full_name,
+        status: 'OPEN',
+        created_at: nowIso(),
+      };
+      db.maintenance.unshift(ticket);
+      saveDb(db);
+      return send(res, 201, ticket);
+    }
+
+    if (m === 'POST' && p === '/api/mobile/checkin') {
+      const auth = requireCaptainAuth(req, res, db);
+      if (!auth) return;
+      const body = await readBody(req);
+      if (body.vessel_id && body.vessel_id !== auth.vessel.id) {
+        return send(res, 403, { message: 'Không được phép Check-in cho sà lan khác.' });
+      }
+      if (body.voyage_id) {
+        const vy = db.voyages.find((x) => x.id === body.voyage_id);
+        if (!vy || vy.vessel_id !== auth.vessel.id) {
+          return send(res, 403, { message: 'Bạn không có quyền thao tác chuyến của sà lan khác.' });
+        }
+        if (body.action === 'DEPART') vy.status = 'IN_TRANSIT';
+        if (body.action === 'ARRIVE') vy.status = 'ARRIVED';
+      }
+      if (body.lat !== undefined && body.lng !== undefined) {
+        auth.vessel.lat = Number(body.lat);
+        auth.vessel.lng = Number(body.lng);
+      }
+      saveDb(db);
+      return send(res, 200, { ok: true, action: body.action || 'CHECKPOINT' });
+    }
+
+    if (m === 'POST' && p === '/api/mobile/step') {
+      const auth = requireCaptainAuth(req, res, db);
+      if (!auth) return;
+      const body = await readBody(req);
+      if (body.vessel_id && body.vessel_id !== auth.vessel.id) {
+        return send(res, 403, { message: 'Bạn không có quyền báo cáo cho sà lan khác.' });
+      }
       const ts = body.timestamp || nowIso();
       const vy = db.voyages.find((x) => x.id === body.voyage_id);
-      if (vy) {
-        vy.workflow_step = Math.max(Number(vy.workflow_step || 0), Number(body.step || 0));
-        if (body.step === 2) vy.loading_completed_at = vy.loading_completed_at || ts;
-        if (body.step === 3) {
-          vy.status = 'IN_TRANSIT';
-          vy.atd = vy.atd || ts;
-        }
-        if (body.step === 4) {
-          vy.status = 'ARRIVED';
-          vy.ata = vy.ata || ts;
-          vy.laytime_start_at = vy.laytime_start_at || ts;
-        }
-        if (body.step === 5) {
-          vy.status = 'COMPLETED';
-          vy.completed_unloading_at = vy.completed_unloading_at || ts;
-          db.bookings.forEach((b) => {
-            if (b.voyage_id === vy.id) b.status = 'COMPLETED';
-          });
-        }
-        if (body.fuel_start_liters !== undefined) vy.fuel_start_liters = Number(body.fuel_start_liters);
-        if (body.fuel_added_liters !== undefined) vy.fuel_added_liters = Number(body.fuel_added_liters);
-        if (body.fuel_end_liters !== undefined) vy.fuel_end_liters = Number(body.fuel_end_liters);
-        if (body.fuel_start_photo_url) vy.fuel_start_photo_url = body.fuel_start_photo_url;
-        if (body.pod_photo_url) vy.pod_photo_url = body.pod_photo_url;
-        vy.captain_report_log = [
-          ...(vy.captain_report_log || []),
-          { step: body.step, timestamp: ts, lat: body.lat ?? null, lng: body.lng ?? null, notes: body.notes ?? null },
-        ];
+      if (!vy || vy.vessel_id !== auth.vessel.id) {
+        return send(res, 403, { message: 'Không tìm thấy chuyến thuộc sà lan của bạn.' });
       }
-      const v = db.vessels.find((x) => x.id === body.vessel_id);
+      vy.workflow_step = Math.max(Number(vy.workflow_step || 0), Number(body.step || 0));
+      if (body.step === 2) vy.loading_completed_at = vy.loading_completed_at || ts;
+      if (body.step === 3) {
+        vy.status = 'IN_TRANSIT';
+        vy.atd = vy.atd || ts;
+      }
+      if (body.step === 4) {
+        vy.status = 'ARRIVED';
+        vy.ata = vy.ata || ts;
+        vy.laytime_start_at = vy.laytime_start_at || ts;
+      }
+      if (body.step === 5) {
+        vy.status = 'COMPLETED';
+        vy.completed_unloading_at = vy.completed_unloading_at || ts;
+        db.bookings.forEach((b) => {
+          if (b.voyage_id === vy.id) b.status = 'COMPLETED';
+        });
+      }
+      if (body.fuel_start_liters !== undefined) vy.fuel_start_liters = Number(body.fuel_start_liters);
+      if (body.fuel_added_liters !== undefined) vy.fuel_added_liters = Number(body.fuel_added_liters);
+      if (body.fuel_end_liters !== undefined) vy.fuel_end_liters = Number(body.fuel_end_liters);
+      if (body.fuel_start_photo_url) vy.fuel_start_photo_url = body.fuel_start_photo_url;
+      if (body.pod_photo_url) vy.pod_photo_url = body.pod_photo_url;
+      vy.captain_report_log = [
+        ...(vy.captain_report_log || []),
+        { step: body.step, timestamp: ts, lat: body.lat ?? null, lng: body.lng ?? null, notes: body.notes ?? null },
+      ];
+      const v = auth.vessel;
       if (v) {
         if (body.step === 3) v.status = 'IN_VOYAGE';
         if (body.step === 5) v.status = 'AVAILABLE';

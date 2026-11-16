@@ -14,6 +14,7 @@ import {
   type Vessel,
   type Voyage,
 } from '@/lib/api';
+import { captainAuthHeaders } from '@/lib/captain-auth';
 
 const LOCAL_BOOKINGS_KEY = 'vietsun_tms_local_bookings_v2';
 const LOCAL_VOYAGE_PATCHES_KEY = 'vietsun_tms_local_voyage_patches_v2';
@@ -531,7 +532,7 @@ export async function submitCaptainStepAction(
   try {
     const res = await fetch(`${API_URL}/mobile/step`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...captainAuthHeaders() },
       body: JSON.stringify(item),
     });
     if (res.ok) {
@@ -556,7 +557,7 @@ export async function syncOfflineCaptainQueue(): Promise<{
     try {
       const res = await fetch(`${API_URL}/mobile/step`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...captainAuthHeaders() },
         body: JSON.stringify(item),
       });
       if (res.ok) {

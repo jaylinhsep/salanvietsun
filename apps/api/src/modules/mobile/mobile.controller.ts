@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { MobileService } from './mobile.service';
 
@@ -7,21 +7,57 @@ import { MobileService } from './mobile.service';
 export class MobileController {
   constructor(private readonly mobileService: MobileService) {}
 
+  @Post('login')
+  @ApiOperation({ summary: 'Đăng nhập tài khoản Thuyền trưởng (gắn cố định 1 sà lan)' })
+  login(@Body() body: { username?: string; password?: string }) {
+    return this.mobileService.loginCaptain(body);
+  }
+
+  @Get('workspace')
+  @ApiOperation({ summary: 'Dữ liệu cô lập của riêng sà lan mà Thuyền trưởng đang đăng nhập' })
+  getWorkspace(@Headers('authorization') authorization?: string) {
+    return this.mobileService.getCaptainWorkspace(authorization);
+  }
+
   @Get('captain-summary')
   @ApiOperation({ summary: 'Thông tin sà lan & chuyến hiện tại cho App Thuyền trưởng' })
-  getCaptainSummary(@Query('vesselCode') vesselCode?: string) {
-    return this.mobileService.getCaptainSummary(vesselCode);
+  getCaptainSummary(@Headers('authorization') authorization?: string) {
+    return this.mobileService.getCaptainSummaryWithAuth(authorization);
   }
 
   @Post('checkin')
   @ApiOperation({ summary: 'Thuyền trưởng Check-in rời cảng / cập cảng kèm tọa độ GPS' })
-  captainCheckIn(@Body() body: any) {
-    return this.mobileService.captainCheckIn(body);
+  captainCheckIn(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: any,
+  ) {
+    return this.mobileService.captainCheckInWithAuth(authorization, body);
   }
 
   @Post('step')
   @ApiOperation({ summary: 'Thuyền trưởng báo cáo 5 bước hành trình (hỗ trợ đồng bộ offline)' })
-  submitStep(@Body() body: any) {
-    return this.mobileService.submitCaptainStep(body);
+  submitStep(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: any,
+  ) {
+    return this.mobileService.submitCaptainStepWithAuth(authorization, body);
+  }
+
+  @Post('fuel')
+  @ApiOperation({ summary: 'Thuyền trưởng báo cáo cấp dầu / tiêu thụ cho sà lan của mình' })
+  reportFuel(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: any,
+  ) {
+    return this.mobileService.createScopedFuelLog(authorization, body);
+  }
+
+  @Post('maintenance')
+  @ApiOperation({ summary: 'Thuyền trưởng gửi yêu cầu bảo trì / báo sự cố cho sà lan của mình' })
+  reportMaintenance(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: any,
+  ) {
+    return this.mobileService.createScopedMaintenanceOrder(authorization, body);
   }
 }
