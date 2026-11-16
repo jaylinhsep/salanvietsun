@@ -88,10 +88,21 @@ function makeDefaultDraft(voyage: Voyage, defaultBookingNo = ''): DraftRow {
   };
 }
 
+function normalizeContTypeToken(raw?: string): ContType | null {
+  if (!raw) return null;
+  const up = raw.trim().toUpperCase().replace(/[^0-9A-Z]/g, '');
+  if (up === '20E' || up === '20F' || up === '40E' || up === '40F') return up;
+  if (up === '20DC' || up === '20GP') return '20F';
+  if (up === '40HC' || up === '40HQ' || up === '40DC' || up === '40GP') return '40F';
+  return null;
+}
+
 /**
- * Supports pasting operational Excel rows:
- * Format A (with Booking & Seal): SALAN | BOOKING | SO CHUYEN | SO CONT | SEAL | CANG DI | CANG DEN | CHU HANG | NGAY DI | 20E | 20F | 40E | 40F | GHI CHU
- * Format B (classic): SALAN | SO CHUYEN | SO CONT | CANG DI | CANG DEN | CHU HANG | NGAY DI | 20E | 20F | 40E | 40F | ... | GHI CHU
+ * Supports pasting:
+ * 1. Single-column list of Container Numbers (e.g. MSBU1514898 one per line, or comma/space separated)
+ * 2. Shorthand 2-4 cols (CONT | SEAL | 20E/40F | NOTE)
+ * 3. Format A (with Booking & Seal): SALAN | BOOKING | SO CHUYEN | SO CONT | SEAL | CANG DI | CANG DEN | CHU HANG | NGAY DI | 20E | 20F | 40E | 40F | GHI CHU
+ * 4. Format B (classic): SALAN | SO CHUYEN | SO CONT | CANG DI | CANG DEN | CHU HANG | NGAY DI | 20E | 20F | 40E | 40F | ... | GHI CHU
  */
 function parseExcelPaste(text: string, fallback: DraftRow): DraftRow[] {
   const lines = text
@@ -99,10 +110,12 @@ function parseExcelPaste(text: string, fallback: DraftRow): DraftRow[] {
     .map((l) => l.replace(/\r$/, ''))
     .filter((l) => l.trim().length > 0);
 
+  const looksLikeCont = (s?: string) => /^[A-Z]{3,4}[UJZ]?\d{5,8}$/i.test((s || '').trim());
   const parsed: DraftRow[] = [];
+
   for (const line of lines) {
     const cols = line.split('\t').map((c) => c.trim());
-    if (cols.length < 2) continue;
+    if (cols.length === 0) continue;
 
     const joined = cols.slice(0, 5).join(' ').toUpperCase();
     if (
@@ -110,13 +123,58 @@ function parseExcelPaste(text: string, fallback: DraftRow): DraftRow[] {
       joined.includes('SÀ LAN') ||
       joined.includes('SỐCONT') ||
       joined.includes('SỐ CONT') ||
-      joined.includes('20E')
+      joined.includes('CONTAINER NO') ||
+      joined.includes('CONT NO') ||
+      joined === '20E'
     ) {
       continue;
     }
 
-    // Heuristic: if col[3] looks like a container no (4 letters + 7 digits) or col[4] is seal & col[8] is date -> Format A
-    const looksLikeCont = (s?: string) => /^[A-Z]{3,4}[UJZ]?\d{6,7}$/i.test((s || '').trim());
+    // Case 1: Single column list (e.g. copied 1 column of container numbers from Excel/Zalo)
+    if (cols.length === 1) {
+      const tokens = cols[0]
+        .split(/[\s,;]+/)
+        .map((t) => t.trim().toUpperCase())
+        .filter((t) => t.length >= 4 && !/^(STT|CONT|CONTAINER|SOCONT)$/i.test(t));
+
+      for (const token of tokens) {
+        parsed.push({
+          ...fallback,
+          container_no: token,
+          seal_no: '',
+          notes: '',
+        });
+      }
+      continue;
+    }
+
+    // Case 2: Shorthand 2-4 columns where first column is container number
+    if (cols.length <= 5 && looksLikeCont(cols[0])) {
+      let contType: ContType = fallback.cont_type;
+      let sealNo = '';
+      let notes = '';
+      for (const extra of cols.slice(1)) {
+        if (!extra) continue;
+        const matchedType = normalizeContTypeToken(extra);
+        if (matchedType) {
+          contType = matchedType;
+        } else if (!sealNo) {
+          sealNo = extra.toUpperCase();
+        } else {
+          notes = notes ? `${notes} ${extra}` : extra;
+        }
+      }
+      parsed.push({
+        ...fallback,
+        container_no: cols[0].toUpperCase(),
+        seal_no: sealNo,
+        cont_type: contType,
+        notes,
+      });
+      continue;
+    }
+
+    // Case 3 & 4: Full Excel rows (Format A with Booking/Seal or Format B classic)
     const isFormatA = looksLikeCont(cols[3]) || Boolean(parseExcelDate(cols[8]));
 
     const bargeCode = cols[0] || fallback.barge_code;
@@ -132,7 +190,7 @@ function parseExcelPaste(text: string, fallback: DraftRow): DraftRow[] {
     const depDate = parseExcelDate(isFormatA ? cols[8] : cols[6]) || fallback.departure_date;
 
     const typeStart = isFormatA ? 9 : 7;
-    let contType: ContType = '20F';
+    let contType: ContType = fallback.cont_type;
     if (parseNum(cols[typeStart]) > 0) contType = '20E';
     else if (parseNum(cols[typeStart + 1]) > 0) contType = '20F';
     else if (parseNum(cols[typeStart + 2]) > 0) contType = '40E';
@@ -140,8 +198,9 @@ function parseExcelPaste(text: string, fallback: DraftRow): DraftRow[] {
     else {
       const explicit = cols
         .slice(typeStart, typeStart + 4)
-        .find((c) => /^(20E|20F|40E|40F)$/i.test(c));
-      if (explicit) contType = explicit.toUpperCase() as ContType;
+        .map((c) => normalizeContTypeToken(c))
+        .find(Boolean);
+      if (explicit) contType = explicit;
     }
 
     const notes = isFormatA ? cols[13] || '' : cols[15] || cols[11] || '';
@@ -183,6 +242,10 @@ export function VoyageContainersPanel({
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [replaceOnPaste, setReplaceOnPaste] = useState(false);
+  const [pasteDefaults, setPasteDefaults] = useState<DraftRow>(() => makeDefaultDraft(voyage));
+
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualRow, setManualRow] = useState<DraftRow>(() => makeDefaultDraft(voyage));
 
   const contNoInputRef = useRef<HTMLInputElement>(null);
 
@@ -348,9 +411,56 @@ export function VoyageContainersPanel({
   };
 
   const parsedPasteRows = useMemo(
-    () => parseExcelPaste(pasteText, makeDefaultDraft(voyage, voyageBookings[0]?.booking_no || '')),
-    [pasteText, voyage, voyageBookings],
+    () => parseExcelPaste(pasteText, pasteDefaults),
+    [pasteText, pasteDefaults],
   );
+
+  const openPasteModal = () => {
+    setPasteDefaults({
+      ...newRow,
+      booking_no: newRow.booking_no || voyageBookings[0]?.booking_no || '',
+    });
+    setShowPasteModal(true);
+  };
+
+  const openManualModal = () => {
+    setManualRow({
+      ...newRow,
+      booking_no: newRow.booking_no || voyageBookings[0]?.booking_no || '',
+      container_no: '',
+      seal_no: '',
+      notes: '',
+    });
+    setShowManualModal(true);
+  };
+
+  const handleSaveManualRow = async (keepOpen: boolean) => {
+    if (!manualRow.container_no.trim()) {
+      alert('Vui lòng nhập SỐ CONT.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/dispatch/voyages/${voyage.id}/containers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(manualRow),
+      });
+      if (!res.ok) {
+        alert(`Không thể thêm container (${res.status}): ${await res.text()}`);
+        return;
+      }
+      await loadContainers();
+      onVoyageUpdated();
+      if (keepOpen) {
+        setManualRow((prev) => ({ ...prev, container_no: '', seal_no: '', notes: '' }));
+      } else {
+        setShowManualModal(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleImportPaste = async () => {
     if (parsedPasteRows.length === 0) {
@@ -458,10 +568,16 @@ export function VoyageContainersPanel({
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setShowPasteModal(true)}
+            onClick={openManualModal}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-maritime-600 text-white text-xs font-medium hover:bg-maritime-500"
+          >
+            <Plus className="w-4 h-4" /> Thêm 1 dòng thủ công
+          </button>
+          <button
+            onClick={openPasteModal}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-500"
           >
-            <ClipboardPaste className="w-4 h-4" /> Dán hàng loạt từ Excel
+            <ClipboardPaste className="w-4 h-4" /> Dán list Cont / từ Excel
           </button>
           <button
             onClick={handleSyncVoyageCounts}
@@ -939,10 +1055,10 @@ export function VoyageContainersPanel({
             <div className="flex items-center justify-between border-b pb-3">
               <div>
                 <h3 className="font-bold text-lg text-slate-900">
-                  Dán dữ liệu vận hành Container từ Excel
+                  Dán danh sách Số Cont hoặc bảng Excel
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Hỗ trợ copy từ bảng Excel vận hành: SÀ LAN | SỐ BOOKING | SỐ CHUYẾN | SỐ CONT | SỐ SEAL | CẢNG ĐI | CẢNG ĐẾN | CHỦ HÀNG | NGÀY ĐI | 20E | 20F | 40E | 40F | GHI CHÚ (hoặc mẫu cũ không có Booking/Seal).
+                  Hỗ trợ: <b>(1) Dán duy nhất 1 cột danh sách Số Cont</b> (mỗi dòng 1 cont), <b>(2) Cont + Seal / Loại Cont</b>, hoặc <b>(3) Copy đầy đủ bảng Excel nhiều cột</b>.
                 </p>
               </div>
               <button
@@ -953,10 +1069,86 @@ export function VoyageContainersPanel({
               </button>
             </div>
 
+            {/* Defaults applied automatically when pasting a 1-column list of container numbers */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 text-xs">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-600">Số Booking</label>
+                <input
+                  list="dl-voyage-bookings"
+                  className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white uppercase font-semibold"
+                  value={pasteDefaults.booking_no}
+                  onChange={(e) =>
+                    setPasteDefaults({ ...pasteDefaults, booking_no: e.target.value.toUpperCase() })
+                  }
+                  placeholder="BK-..."
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-600">Loại Cont mặc định</label>
+                <select
+                  className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white font-bold"
+                  value={pasteDefaults.cont_type}
+                  onChange={(e) =>
+                    setPasteDefaults({ ...pasteDefaults, cont_type: e.target.value as ContType })
+                  }
+                >
+                  {CONT_TYPES.map((ct) => (
+                    <option key={ct} value={ct}>
+                      {ct}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-600">Cảng đi (POL)</label>
+                <input
+                  list="dl-ports"
+                  className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white"
+                  value={pasteDefaults.origin_name}
+                  onChange={(e) =>
+                    setPasteDefaults({ ...pasteDefaults, origin_name: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-600">Cảng đến (POD)</label>
+                <input
+                  list="dl-ports"
+                  className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white"
+                  value={pasteDefaults.destination_name}
+                  onChange={(e) =>
+                    setPasteDefaults({ ...pasteDefaults, destination_name: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-600">Chủ hàng</label>
+                <input
+                  list="dl-customers"
+                  className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white"
+                  value={pasteDefaults.shipper_name}
+                  onChange={(e) =>
+                    setPasteDefaults({ ...pasteDefaults, shipper_name: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-600">Ngày đi</label>
+                <input
+                  type="date"
+                  className="w-full border rounded px-2 py-1 mt-0.5 bg-white"
+                  value={pasteDefaults.departure_date}
+                  onChange={(e) =>
+                    setPasteDefaults({ ...pasteDefaults, departure_date: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+
             <textarea
               rows={8}
               className="w-full border border-slate-300 rounded-lg p-3 font-mono text-xs"
-              placeholder={'NV36\tBK-26-4302\tV.36-04926W\tMSMU1758748\tSL9921\tSPITC\tTrà Nóc\tPhước Tạo\t10/21/2026\t1\t\t\t\t'}
+              placeholder={'Dán danh sách Số Cont (1 dòng 1 cont):\nMSBU1514898\nMSDU1049725\n\nHoặc copy nhiều cột trực tiếp từ Excel...'}
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
             />
@@ -1028,6 +1220,178 @@ export function VoyageContainersPanel({
                 className="px-4 py-2 rounded-lg bg-maritime-600 text-white text-sm font-medium disabled:opacity-50"
               >
                 {saving ? 'Đang lưu...' : `Lưu ${parsedPasteRows.length} dòng vào chuyến`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Add 1 Container Manually Modal */}
+      {showManualModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-bold text-lg text-slate-900">
+                Thêm mới 1 dòng Container thủ công
+              </h3>
+              <button
+                onClick={() => setShowManualModal(false)}
+                className="p-1.5 rounded hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+              <div>
+                <label className="text-xs font-medium text-slate-600">Sà lan</label>
+                <input
+                  list="dl-vessels"
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={manualRow.barge_code}
+                  onChange={(e) => setManualRow({ ...manualRow, barge_code: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Số Booking</label>
+                <input
+                  list="dl-voyage-bookings"
+                  className="w-full border rounded-lg px-3 py-2 mt-1 uppercase font-semibold"
+                  value={manualRow.booking_no}
+                  onChange={(e) =>
+                    setManualRow({ ...manualRow, booking_no: e.target.value.toUpperCase() })
+                  }
+                  placeholder="BK-..."
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Số chuyến</label>
+                <input
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={manualRow.trip_no}
+                  onChange={(e) => setManualRow({ ...manualRow, trip_no: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+              <div>
+                <label className="text-xs font-medium text-slate-600">Số Cont *</label>
+                <input
+                  autoFocus
+                  className="w-full border-2 border-maritime-400 rounded-lg px-3 py-2 mt-1 font-mono font-bold uppercase"
+                  value={manualRow.container_no}
+                  onChange={(e) =>
+                    setManualRow({ ...manualRow, container_no: e.target.value.toUpperCase() })
+                  }
+                  placeholder="MSBU1514898"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Số Seal</label>
+                <input
+                  className="w-full border rounded-lg px-3 py-2 mt-1 font-mono uppercase"
+                  value={manualRow.seal_no}
+                  onChange={(e) =>
+                    setManualRow({ ...manualRow, seal_no: e.target.value.toUpperCase() })
+                  }
+                  placeholder="SL12345"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Ngày đi</label>
+                <input
+                  type="date"
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={manualRow.departure_date}
+                  onChange={(e) => setManualRow({ ...manualRow, departure_date: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+              <div>
+                <label className="text-xs font-medium text-slate-600">Cảng đi (POL)</label>
+                <input
+                  list="dl-ports"
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={manualRow.origin_name}
+                  onChange={(e) => setManualRow({ ...manualRow, origin_name: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Cảng đến (POD)</label>
+                <input
+                  list="dl-ports"
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={manualRow.destination_name}
+                  onChange={(e) => setManualRow({ ...manualRow, destination_name: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Chủ hàng</label>
+                <input
+                  list="dl-customers"
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={manualRow.shipper_name}
+                  onChange={(e) => setManualRow({ ...manualRow, shipper_name: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1.5">Loại Container</label>
+              <div className="grid grid-cols-4 gap-2">
+                {CONT_TYPES.map((ct) => (
+                  <button
+                    key={ct}
+                    type="button"
+                    onClick={() => setManualRow({ ...manualRow, cont_type: ct })}
+                    className={`py-2 rounded-lg font-bold text-sm border ${
+                      manualRow.cont_type === ct
+                        ? 'bg-maritime-600 text-white border-maritime-600'
+                        : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    {ct}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="text-sm">
+              <label className="text-xs font-medium text-slate-600">Ghi chú</label>
+              <input
+                className="w-full border rounded-lg px-3 py-2 mt-1"
+                value={manualRow.notes}
+                onChange={(e) => setManualRow({ ...manualRow, notes: e.target.value })}
+                placeholder="Ghi chú cont (nếu có)"
+              />
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => setShowManualModal(false)}
+                className="px-4 py-2 border rounded-lg text-sm"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleSaveManualRow(true)}
+                className="px-4 py-2 rounded-lg border border-maritime-600 text-maritime-700 text-sm font-semibold hover:bg-maritime-50 disabled:opacity-50"
+              >
+                Lưu & Thêm tiếp
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleSaveManualRow(false)}
+                className="px-4 py-2 rounded-lg bg-maritime-600 text-white text-sm font-semibold hover:bg-maritime-500 disabled:opacity-50"
+              >
+                Lưu & Đóng
               </button>
             </div>
           </div>
