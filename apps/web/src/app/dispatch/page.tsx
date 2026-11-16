@@ -81,8 +81,11 @@ export default function DispatchPage() {
   // Filters for Voyages list
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterVesselId, setFilterVesselId] = useState<string>('');
+  const [filterCustomerId, setFilterCustomerId] = useState<string>('');
+  const [filterDate, setFilterDate] = useState<string>('');
+  const [filterMonth, setFilterMonth] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [visibleLimit, setVisibleLimit] = useState<number>(80);
+  const [visibleLimit, setVisibleLimit] = useState<number>(15);
 
   const loadAll = () => {
     fetchApi<Voyage[]>('/dispatch/voyages', FALLBACK_VOYAGES).then((r) => setVoyages(r.data));
@@ -288,18 +291,41 @@ export default function DispatchPage() {
     }
   };
 
-  const filteredVoyages = voyages.filter((vy) => {
-    if (filterStatus !== 'ALL' && vy.status !== filterStatus) return false;
-    if (filterVesselId && vy.vessel_id !== filterVesselId) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      const hay = `${vy.voyage_no} ${vy.vessel_name} ${vy.customer_name || ''} ${vy.booking_nos || ''} ${vy.origin_name || ''} ${vy.dest_name || ''}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
+  const getVoyageDate = (vy: Voyage) =>
+    (vy.received_date || vy.etd || vy.vessel_berth_date || '').slice(0, 10);
 
+  const filteredVoyages = [...voyages]
+    .filter((vy) => {
+      const d = getVoyageDate(vy);
+      if (filterDate && d !== filterDate) return false;
+      if (filterMonth && !d.startsWith(filterMonth)) return false;
+      if (filterCustomerId && vy.customer_id !== filterCustomerId) return false;
+      if (filterStatus !== 'ALL' && vy.status !== filterStatus) return false;
+      if (filterVesselId && vy.vessel_id !== filterVesselId) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const hay = `${vy.voyage_no} ${vy.vessel_name} ${vy.customer_code || ''} ${vy.customer_name || ''} ${vy.booking_nos || ''} ${vy.origin_name || ''} ${vy.dest_name || ''} ${d}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const dA = getVoyageDate(a);
+      const dB = getVoyageDate(b);
+      if (dB !== dA) return dB.localeCompare(dA);
+      return (b.voyage_no || '').localeCompare(a.voyage_no || '', 'vi');
+    });
+
+  const hasActiveFilter = Boolean(
+    filterDate || filterMonth || filterCustomerId || filterVesselId || filterStatus !== 'ALL' || searchQuery.trim(),
+  );
+
+  const sum20e = filteredVoyages.reduce((acc, vy) => acc + Number(vy.cont_20e || 0), 0);
+  const sum20f = filteredVoyages.reduce((acc, vy) => acc + Number(vy.cont_20f || 0), 0);
+  const sum40e = filteredVoyages.reduce((acc, vy) => acc + Number(vy.cont_40e || 0), 0);
+  const sum40f = filteredVoyages.reduce((acc, vy) => acc + Number(vy.cont_40f || 0), 0);
   const sumTeus = filteredVoyages.reduce((acc, vy) => acc + Number(vy.total_teus || 0), 0);
+  const sumDetailCount = filteredVoyages.reduce((acc, vy) => acc + Number(vy.detail_count || 0), 0);
 
   return (
     <div className="space-y-5">
@@ -391,19 +417,68 @@ export default function DispatchPage() {
 
       {activeTab === 'VOYAGES' && !selectedVoyage && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 space-y-2 text-xs">
             <div className="flex flex-wrap items-center gap-2">
               <input
                 type="text"
-                placeholder="Tìm mã chuyến, booking, khách hàng..."
+                placeholder="Tìm mã chuyến, booking, tuyến..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-xs w-60"
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setVisibleLimit(15);
+                }}
+                className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-xs w-52"
               />
+              <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded px-2 py-1">
+                <span className="text-[11px] text-slate-500">Ngày:</span>
+                <input
+                  type="date"
+                  value={filterDate}
+                  onChange={(e) => {
+                    setFilterDate(e.target.value);
+                    if (e.target.value) setFilterMonth('');
+                    setVisibleLimit(15);
+                  }}
+                  className="text-xs outline-none bg-transparent"
+                  title="Lọc theo ngày cụ thể"
+                />
+              </div>
+              <div className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded px-2 py-1">
+                <span className="text-[11px] text-slate-500">Tháng:</span>
+                <input
+                  type="month"
+                  value={filterMonth}
+                  onChange={(e) => {
+                    setFilterMonth(e.target.value);
+                    if (e.target.value) setFilterDate('');
+                    setVisibleLimit(15);
+                  }}
+                  className="text-xs outline-none bg-transparent"
+                  title="Lọc theo tháng"
+                />
+              </div>
+              <select
+                value={filterCustomerId}
+                onChange={(e) => {
+                  setFilterCustomerId(e.target.value);
+                  setVisibleLimit(15);
+                }}
+                className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-xs max-w-[160px]"
+              >
+                <option value="">Tất cả Khách hàng ({customers.length})</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} — {c.name}
+                  </option>
+                ))}
+              </select>
               <select
                 value={filterVesselId}
-                onChange={(e) => setFilterVesselId(e.target.value)}
-                className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-xs"
+                onChange={(e) => {
+                  setFilterVesselId(e.target.value);
+                  setVisibleLimit(15);
+                }}
+                className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-xs max-w-[155px]"
               >
                 <option value="">Tất cả Sà lan ({vessels.length})</option>
                 {vessels.map((v) => (
@@ -414,7 +489,10 @@ export default function DispatchPage() {
               </select>
               <select
                 value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
+                onChange={(e) => {
+                  setFilterStatus(e.target.value);
+                  setVisibleLimit(15);
+                }}
                 className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-xs"
               >
                 <option value="ALL">Tất cả trạng thái ({voyages.length})</option>
@@ -422,132 +500,232 @@ export default function DispatchPage() {
                 <option value="PLANNED">Đã lập kế hoạch / Đang gom</option>
                 <option value="IN_TRANSIT">Đang vận chuyển</option>
               </select>
+              {hasActiveFilter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterDate('');
+                    setFilterMonth('');
+                    setFilterCustomerId('');
+                    setFilterVesselId('');
+                    setFilterStatus('ALL');
+                    setSearchQuery('');
+                    setVisibleLimit(15);
+                  }}
+                  className="px-2.5 py-1.5 rounded bg-slate-200 text-slate-700 hover:bg-slate-300 font-medium"
+                >
+                  Xóa lọc
+                </button>
+              )}
             </div>
-            <span className="font-bold text-rose-600 text-sm">
-              {filteredVoyages.length} chuyến • Tổng sản lượng: {sumTeus} TEUs
-            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/70">
+              <span className="text-slate-500">
+                Sắp xếp: <strong>Ngày gần nhất trên cùng</strong> • Đang hiện {Math.min(visibleLimit, filteredVoyages.length)} / {filteredVoyages.length} chuyến
+              </span>
+              <span className="font-bold text-rose-600 text-xs sm:text-sm">
+                Tổng theo bộ lọc: {filteredVoyages.length} chuyến • {sumTeus.toLocaleString('en-US')} TEUs ({sumDetailCount.toLocaleString('en-US')} cont chi tiết)
+              </span>
+            </div>
           </div>
+
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left whitespace-nowrap">
+            <table className="w-full text-xs text-left">
               <thead className="bg-slate-100 text-slate-700 uppercase font-semibold border-b border-slate-200">
                 <tr>
-                  <th className="px-3 py-2.5">Ngày nhận</th>
-                  <th className="px-3 py-2.5">Mã chuyến</th>
-                  <th className="px-3 py-2.5">PIC</th>
-                  <th className="px-3 py-2.5">Khách hàng</th>
-                  <th className="px-2 py-2.5 text-center">20E</th>
-                  <th className="px-2 py-2.5 text-center">20F</th>
-                  <th className="px-2 py-2.5 text-center">40E</th>
-                  <th className="px-2 py-2.5 text-center">40F</th>
-                  <th className="px-3 py-2.5 text-center text-rose-700 bg-rose-50">Số TEUs</th>
-                  <th className="px-3 py-2.5">POL (Cảng đi)</th>
-                  <th className="px-3 py-2.5">POD (Cảng đến)</th>
-                  <th className="px-3 py-2.5">Tàu cập</th>
-                  <th className="px-3 py-2.5">Hạn lệnh</th>
-                  <th className="px-3 py-2.5">SL Tiếp nhận</th>
-                  <th className="px-3 py-2.5">Trạng thái</th>
-                  <th className="px-3 py-2.5 text-right">Thao tác</th>
+                  <th className="px-2.5 py-2.5 w-[92px]">Ngày</th>
+                  <th className="px-2.5 py-2.5 min-w-[150px]">Mã chuyến / BK</th>
+                  <th className="px-2.5 py-2.5">Sà lan</th>
+                  <th className="px-2.5 py-2.5">Khách hàng</th>
+                  <th className="px-2.5 py-2.5">Tuyến (POL → POD)</th>
+                  <th className="px-1.5 py-2.5 text-center w-9">20E</th>
+                  <th className="px-1.5 py-2.5 text-center w-9">20F</th>
+                  <th className="px-1.5 py-2.5 text-center w-9">40E</th>
+                  <th className="px-1.5 py-2.5 text-center w-9">40F</th>
+                  <th className="px-2 py-2.5 text-center text-rose-700 bg-rose-50 w-14">TEUs</th>
+                  <th className="px-2.5 py-2.5 text-right w-[170px]">Trạng thái / Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredVoyages.slice(0, visibleLimit).map((vy) => (
-                  <tr
-                    key={vy.id}
-                    onClick={() => selectVoyage(vy.id)}
-                    className="hover:bg-sky-50/60 cursor-pointer"
-                    title="Bấm để xem hoặc nhập chi tiết container của chuyến này"
-                  >
-                    <td className="px-3 py-2.5 text-slate-600">
-                      {vy.received_date ? vy.received_date.slice(0, 10) : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 font-semibold text-maritime-700 underline decoration-dotted">
-                      <div>{vy.voyage_no}</div>
-                      <div className="text-[10px] font-normal text-slate-500 no-underline">
-                        {vy.detail_count ? `${vy.detail_count} cont chi tiết` : 'Chưa nhập chi tiết'}
-                      </div>
-                      {vy.booking_nos && (
-                        <div className="text-[10px] font-normal text-indigo-600 no-underline max-w-[160px] truncate" title={vy.booking_nos}>
-                          BK: {vy.booking_nos}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5">{vy.pic_name || '—'}</td>
-                    <td className="px-3 py-2.5 font-medium text-slate-900">
-                      {vy.customer_code ? `${vy.customer_code} (${vy.customer_name})` : vy.customer_name || '—'}
-                    </td>
-                    <td className="px-2 py-2.5 text-center">{vy.cont_20e || 0}</td>
-                    <td className="px-2 py-2.5 text-center">{vy.cont_20f || 0}</td>
-                    <td className="px-2 py-2.5 text-center">{vy.cont_40e || 0}</td>
-                    <td className="px-2 py-2.5 text-center">{vy.cont_40f || 0}</td>
-                    <td className="px-3 py-2.5 text-center font-bold text-rose-700 bg-rose-50/60">
-                      {vy.total_teus || 0}
-                    </td>
-                    <td className="px-3 py-2.5 font-medium">{vy.origin_name || '—'}</td>
-                    <td className="px-3 py-2.5 font-medium text-maritime-700">{vy.dest_name || '—'}</td>
-                    <td className="px-3 py-2.5 text-slate-600">
-                      {vy.vessel_berth_date ? vy.vessel_berth_date.slice(0, 10) : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 text-slate-600">
-                      {vy.order_deadline ? vy.order_deadline.slice(0, 10) : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 font-semibold text-slate-800">{vy.vessel_name || 'Chưa gán'}</td>
-                    <td className="px-3 py-2.5">
-                      <StatusBadge status={vy.status} />
-                    </td>
-                    <td
-                      className="px-3 py-2.5 text-right space-x-1.5"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        onClick={() => selectVoyage(vy.id)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 font-medium"
-                      >
-                        <ListChecks className="w-3 h-3" /> Chi tiết
-                      </button>
-                      <button
-                        onClick={() => openEditVoyage(vy)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-100"
-                      >
-                        <Pencil className="w-3 h-3 text-maritime-600" /> Sửa
-                      </button>
-                      {vy.status === 'PLANNED' && (
-                        <button
-                          onClick={() => advanceStatus(vy, 'IN_TRANSIT')}
-                          className="px-2.5 py-1 rounded bg-sky-600 text-white hover:bg-sky-500"
-                        >
-                          Xuất bến
-                        </button>
-                      )}
-                      {vy.status === 'IN_TRANSIT' && (
-                        <button
-                          onClick={() => advanceStatus(vy, 'COMPLETED')}
-                          className="px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-500"
-                        >
-                          Hoàn thành
-                        </button>
-                      )}
+                {filteredVoyages.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
+                      Không tìm thấy chuyến tàu nào phù hợp bộ lọc.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredVoyages.slice(0, visibleLimit).map((vy) => {
+                    const displayDate = getVoyageDate(vy);
+                    return (
+                      <tr
+                        key={vy.id}
+                        onClick={() => selectVoyage(vy.id)}
+                        className="hover:bg-sky-50/60 cursor-pointer align-top"
+                        title="Bấm để xem hoặc nhập chi tiết container của chuyến này"
+                      >
+                        <td className="px-2.5 py-2 text-slate-700 whitespace-nowrap">
+                          <div className="font-semibold">{displayDate || '—'}</div>
+                          {vy.vessel_berth_date && (
+                            <div className="text-[10px] text-slate-400">
+                              Cập: {vy.vessel_berth_date.slice(5, 10)}
+                            </div>
+                          )}
+                          {vy.order_deadline && (
+                            <div className="text-[10px] text-amber-600">
+                              Hạn: {vy.order_deadline.slice(5, 10)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2.5 py-2">
+                          <div className="font-semibold text-maritime-700 underline decoration-dotted">
+                            {vy.voyage_no}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {vy.detail_count ? (
+                              <span className="text-emerald-700 font-medium">{vy.detail_count} cont chi tiết</span>
+                            ) : (
+                              'Chưa nhập cont'
+                            )}
+                            {vy.pic_name ? ` • ${vy.pic_name}` : ''}
+                          </div>
+                          {vy.booking_nos && (
+                            <div
+                              className="text-[10px] text-indigo-600 max-w-[170px] truncate"
+                              title={vy.booking_nos}
+                            >
+                              BK: {vy.booking_nos}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2.5 py-2 font-semibold text-slate-800 leading-snug">
+                          {vy.vessel_name || 'Chưa gán'}
+                        </td>
+                        <td className="px-2.5 py-2 font-medium text-slate-900 leading-snug">
+                          {vy.customer_code ? vy.customer_code : vy.customer_name || '—'}
+                          {vy.customer_name && vy.customer_name !== vy.customer_code && (
+                            <div className="text-[10px] text-slate-500 font-normal truncate max-w-[120px]">
+                              {vy.customer_name}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2.5 py-2 leading-snug">
+                          <div className="font-medium text-slate-700">{vy.origin_name || '—'}</div>
+                          <div className="font-semibold text-maritime-700">→ {vy.dest_name || '—'}</div>
+                        </td>
+                        <td className="px-1.5 py-2 text-center tabular-nums text-slate-600">
+                          {vy.cont_20e || 0}
+                        </td>
+                        <td className="px-1.5 py-2 text-center tabular-nums text-slate-700 font-medium">
+                          {vy.cont_20f || 0}
+                        </td>
+                        <td className="px-1.5 py-2 text-center tabular-nums text-slate-600">
+                          {vy.cont_40e || 0}
+                        </td>
+                        <td className="px-1.5 py-2 text-center tabular-nums text-slate-700 font-medium">
+                          {vy.cont_40f || 0}
+                        </td>
+                        <td className="px-2 py-2 text-center font-bold text-rose-700 bg-rose-50/60 tabular-nums">
+                          {vy.total_teus || 0}
+                        </td>
+                        <td
+                          className="px-2.5 py-2 text-right space-y-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex justify-end">
+                            <StatusBadge status={vy.status} />
+                          </div>
+                          <div className="flex flex-wrap justify-end gap-1">
+                            <button
+                              onClick={() => selectVoyage(vy.id)}
+                              className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 font-medium text-[11px]"
+                            >
+                              <ListChecks className="w-3 h-3" /> Cont
+                            </button>
+                            <button
+                              onClick={() => openEditVoyage(vy)}
+                              className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded border border-slate-200 text-slate-700 hover:bg-slate-100 text-[11px]"
+                            >
+                              <Pencil className="w-3 h-3 text-maritime-600" /> Sửa
+                            </button>
+                            {vy.status === 'PLANNED' && (
+                              <button
+                                onClick={() => advanceStatus(vy, 'IN_TRANSIT')}
+                                className="px-2 py-0.5 rounded bg-sky-600 text-white hover:bg-sky-500 text-[11px]"
+                              >
+                                Xuất bến
+                              </button>
+                            )}
+                            {vy.status === 'IN_TRANSIT' && (
+                              <button
+                                onClick={() => advanceStatus(vy, 'COMPLETED')}
+                                className="px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 text-[11px]"
+                              >
+                                Xong
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
+              {filteredVoyages.length > 0 && (
+                <tfoot className="bg-amber-50/90 border-t-2 border-amber-300 font-bold text-slate-900">
+                  <tr>
+                    <td colSpan={5} className="px-3 py-2.5 text-right uppercase text-[11px] tracking-wide">
+                      Tổng cộng ({filteredVoyages.length} chuyến • {sumDetailCount.toLocaleString('en-US')} cont chi tiết):
+                    </td>
+                    <td className="px-1.5 py-2.5 text-center tabular-nums">{sum20e}</td>
+                    <td className="px-1.5 py-2.5 text-center tabular-nums">{sum20f}</td>
+                    <td className="px-1.5 py-2.5 text-center tabular-nums">{sum40e}</td>
+                    <td className="px-1.5 py-2.5 text-center tabular-nums">{sum40f}</td>
+                    <td className="px-2 py-2.5 text-center text-rose-700 bg-rose-100/80 tabular-nums text-sm">
+                      {sumTeus.toLocaleString('en-US')}
+                    </td>
+                    <td className="px-2.5 py-2.5 text-right text-[11px] text-slate-500 font-normal">
+                      TEUs
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
-          {filteredVoyages.length > visibleLimit && (
-            <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600">
-              <span>Đang hiển thị {Math.min(visibleLimit, filteredVoyages.length)} / {filteredVoyages.length} chuyến</span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setVisibleLimit((v) => v + 100)}
-                  className="px-3 py-1 rounded border border-slate-300 bg-white font-medium hover:bg-slate-100"
-                >
-                  Xem thêm 100 chuyến
-                </button>
-                <button
-                  onClick={() => setVisibleLimit(filteredVoyages.length)}
-                  className="px-3 py-1 rounded bg-navy-900 text-white font-medium hover:bg-navy-800"
-                >
-                  Hiện tất cả ({filteredVoyages.length})
-                </button>
+          {filteredVoyages.length > 15 && (
+            <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+              <span>
+                Đang hiển thị <strong>{Math.min(visibleLimit, filteredVoyages.length)}</strong> / {filteredVoyages.length} chuyến (xếp theo ngày gần nhất)
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {visibleLimit < filteredVoyages.length && (
+                  <>
+                    <button
+                      onClick={() => setVisibleLimit((v) => v + 15)}
+                      className="px-3 py-1 rounded border border-slate-300 bg-white font-medium hover:bg-slate-100"
+                    >
+                      Sổ thêm 15 chuyến
+                    </button>
+                    <button
+                      onClick={() => setVisibleLimit((v) => v + 50)}
+                      className="px-3 py-1 rounded border border-slate-300 bg-white font-medium hover:bg-slate-100"
+                    >
+                      +50 chuyến
+                    </button>
+                    <button
+                      onClick={() => setVisibleLimit(filteredVoyages.length)}
+                      className="px-3 py-1 rounded bg-navy-900 text-white font-medium hover:bg-navy-800"
+                    >
+                      Hiện tất cả ({filteredVoyages.length})
+                    </button>
+                  </>
+                )}
+                {visibleLimit > 15 && (
+                  <button
+                    onClick={() => setVisibleLimit(15)}
+                    className="px-3 py-1 rounded border border-slate-300 bg-white font-medium hover:bg-slate-100"
+                  >
+                    Thu gọn còn 15
+                  </button>
+                )}
               </div>
             </div>
           )}
