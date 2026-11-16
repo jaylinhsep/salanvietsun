@@ -1014,6 +1014,43 @@ const server = http.createServer(async (req, res) => {
       saveDb(db);
       return send(res, 200, merged);
     }
+    if (vyMatch && m === 'DELETE') {
+      const vid = vyMatch[1];
+      const vy = db.voyages.find((x) => x.id === vid);
+      if (!vy) return send(res, 404, { message: 'Voyage not found' });
+
+      let releasedBookings = 0;
+      for (const b of db.bookings || []) {
+        if (b.voyage_id === vid) {
+          b.voyage_id = null;
+          b.status = 'PENDING';
+          b.updated_at = nowIso();
+          releasedBookings++;
+        }
+      }
+      for (const c of db.voyageContainers || []) {
+        if (c.voyage_id === vid) c.voyage_id = null;
+      }
+      for (const pe of db.accountingPortExpenses || []) {
+        if (pe.voyage_id === vid) pe.voyage_id = null;
+      }
+      for (const fe of db.accountingFuelEntries || []) {
+        if (fe.voyage_id === vid) fe.voyage_id = null;
+      }
+      db.voyages = db.voyages.filter((x) => x.id !== vid);
+
+      if (vy.vessel_id) {
+        const stillRunning = db.voyages.some(
+          (x) => x.vessel_id === vy.vessel_id && ['IN_TRANSIT', 'DEPARTED'].includes(x.status),
+        );
+        if (!stillRunning) {
+          const vs = db.vessels.find((x) => x.id === vy.vessel_id);
+          if (vs && vs.status === 'IN_VOYAGE') vs.status = 'AVAILABLE';
+        }
+      }
+      saveDb(db);
+      return send(res, 200, { ok: true, releasedBookings });
+    }
 
     // --- ORDERS & CUSTOMERS ---
     if (m === 'GET' && p === '/api/orders/customers') {

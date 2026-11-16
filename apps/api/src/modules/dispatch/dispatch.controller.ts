@@ -55,6 +55,12 @@ export class DispatchController {
     return this.dispatchService.updateVoyageStatus(id, status);
   }
 
+  @Delete('voyages/:id')
+  @ApiOperation({ summary: 'Xóa chuyến (Hủy kế hoạch) và trả booking về hàng chờ' })
+  deleteVoyage(@Param('id') id: string) {
+    return this.dispatchService.deleteVoyage(id);
+  }
+
   @Get('voyages/:id/containers')
   @ApiOperation({ summary: 'Danh sách chi tiết từng container theo chuyến' })
   listVoyageContainers(@Param('id') id: string) {

@@ -432,6 +432,39 @@ export class DispatchService implements OnModuleInit {
     return res.rows[0];
   }
 
+  async deleteVoyage(id: string) {
+    return this.db.transaction(async (client) => {
+      const vyRes = await client.query(`SELECT id, vessel_id FROM voyages WHERE id = $1`, [id]);
+      const vy = vyRes.rows[0];
+      if (!vy) return { ok: true, releasedBookings: 0 };
+
+      const bkRes = await client.query(
+        `UPDATE bookings SET voyage_id = NULL, status = 'PENDING' WHERE voyage_id = $1 RETURNING id`,
+        [id],
+      );
+      await client.query(`UPDATE voyage_containers SET voyage_id = NULL WHERE voyage_id = $1`, [id]);
+      try {
+        await client.query(`UPDATE accounting_port_expenses SET voyage_id = NULL WHERE voyage_id = $1`, [id]);
+        await client.query(`UPDATE accounting_fuel_entries SET voyage_id = NULL WHERE voyage_id = $1`, [id]);
+      } catch {
+        // Optional accounting link tables may not exist on older DBs yet
+      }
+      await client.query(`DELETE FROM voyages WHERE id = $1`, [id]);
+
+      if (vy.vessel_id) {
+        await client.query(
+          `UPDATE vessels SET status = 'AVAILABLE'
+           WHERE id = $1 AND status = 'IN_VOYAGE'
+             AND NOT EXISTS (
+               SELECT 1 FROM voyages WHERE vessel_id = $1 AND status IN ('IN_TRANSIT', 'DEPARTED')
+             )`,
+          [vy.vessel_id],
+        );
+      }
+      return { ok: true, releasedBookings: bkRes.rowCount || 0 };
+    });
+  }
+
   // --- VOYAGE CONTAINERS (CHI TIẾT TỪNG CHUYẾN) ---
   private normalizeContType(raw?: string): '20E' | '20F' | '40E' | '40F' {
     const up = (raw || '20F').trim().toUpperCase().replace(/[^0-9A-Z]/g, '');

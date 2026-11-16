@@ -186,6 +186,28 @@ export default function DispatchPage() {
     loadAll();
   };
 
+  const handleDeleteVoyage = async (id: string, voyageNo?: string) => {
+    if (
+      !confirm(
+        `Xóa chuyến "${voyageNo || id}" (Hủy kế hoạch)?\nCác booking đang ghép vào chuyến (nếu có) sẽ tự động quay về hàng chờ.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/dispatch/voyages/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        alert(`Không thể xóa chuyến (${res.status}): ${await res.text()}`);
+        return;
+      }
+      setShowVoyageModal(false);
+      if (selectedVoyageId === id) selectVoyage(null);
+      loadAll();
+    } catch (err: any) {
+      alert(`Lỗi kết nối API: ${err?.message || err}`);
+    }
+  };
+
   // --- PORT HANDLERS ---
   const openCreatePort = () => {
     setEditingPortId(null);
@@ -647,6 +669,13 @@ export default function DispatchPage() {
                             >
                               <Pencil className="w-3 h-3 text-maritime-600" /> Sửa
                             </button>
+                            <button
+                              onClick={() => handleDeleteVoyage(vy.id, vy.voyage_no)}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px]"
+                              title="Xóa chuyến (Hủy kế hoạch)"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
                             {vy.status === 'PLANNED' && (
                               <button
                                 onClick={() => advanceStatus(vy, 'IN_TRANSIT')}
@@ -1016,13 +1045,26 @@ export default function DispatchPage() {
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setShowVoyageModal(false)} className="px-4 py-2 rounded-lg border text-sm">
-                Hủy
-              </button>
-              <button type="submit" className="px-4 py-2 rounded-lg bg-maritime-600 text-white text-sm font-medium">
-                {editingVoyageId ? 'Lưu thay đổi' : 'Phát lệnh điều độ'}
-              </button>
+            <div className="flex items-center justify-between gap-2 pt-2">
+              <div>
+                {editingVoyageId && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteVoyage(editingVoyageId, voyageForm.voyage_no)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-sm font-medium"
+                  >
+                    <Trash2 className="w-4 h-4" /> Xóa chuyến (Hủy kế hoạch)
+                  </button>
+                )}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setShowVoyageModal(false)} className="px-4 py-2 rounded-lg border text-sm">
+                  Hủy
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-lg bg-maritime-600 text-white text-sm font-medium">
+                  {editingVoyageId ? 'Lưu thay đổi' : 'Phát lệnh điều độ'}
+                </button>
+              </div>
             </div>
           </form>
         </div>
