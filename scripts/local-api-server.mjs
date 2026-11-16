@@ -111,6 +111,11 @@ function defaultSeedDb() {
     invoices: [],
     fuelLogs: [],
     maintenance: [],
+    accountingFixedCosts: [],
+    accountingPortExpenses: [],
+    accountingFuelEntries: [],
+    accountingSupplies: [],
+    accountingVendorCosts: [],
   };
 }
 
@@ -120,7 +125,15 @@ function loadDb() {
     fs.writeFileSync(DB_FILE, JSON.stringify(seed, null, 2), 'utf8');
     return seed;
   }
-  return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+  const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+  return {
+    ...parsed,
+    accountingFixedCosts: parsed.accountingFixedCosts || [],
+    accountingPortExpenses: parsed.accountingPortExpenses || [],
+    accountingFuelEntries: parsed.accountingFuelEntries || [],
+    accountingSupplies: parsed.accountingSupplies || [],
+    accountingVendorCosts: parsed.accountingVendorCosts || [],
+  };
 }
 
 function saveDb(db) {
@@ -214,6 +227,193 @@ function normalizeContainerPayload(dto) {
     fuel_price_no_vat: Number(dto.fuel_price_no_vat || 0) || 0,
     notes: dto.notes ? String(dto.notes).trim() : null,
   };
+}
+
+const ACC_COLLECTION_MAP = {
+  'fixed-costs': 'accountingFixedCosts',
+  'port-expenses': 'accountingPortExpenses',
+  'fuel-entries': 'accountingFuelEntries',
+  supplies: 'accountingSupplies',
+  'vendor-costs': 'accountingVendorCosts',
+};
+
+function computeAccountingPnl(db, year, month) {
+  const mm = String(month).padStart(2, '0');
+  const periodMonth = `${year}-${mm}`;
+  const yearPrefix = `${year}-`;
+  const normBarge = (c) => (c ? String(c).trim().toUpperCase() : 'CHUNG');
+
+  const bargeCodes = new Set(['NV18', 'NV36', 'NV38']);
+  for (const v of db.vessels || []) if (v.code) bargeCodes.add(normBarge(v.code));
+  for (const c of db.voyageContainers || []) if (c.barge_code) bargeCodes.add(normBarge(c.barge_code));
+  for (const r of db.accountingFixedCosts || []) if (r.vessel_code) bargeCodes.add(normBarge(r.vessel_code));
+  for (const r of db.accountingPortExpenses || []) if (r.vessel_code) bargeCodes.add(normBarge(r.vessel_code));
+  for (const r of db.accountingFuelEntries || []) if (r.vessel_code) bargeCodes.add(normBarge(r.vessel_code));
+  for (const r of db.accountingSupplies || []) if (r.vessel_code) bargeCodes.add(normBarge(r.vessel_code));
+
+  const emptyBucket = (code) => ({
+    vessel_code: code,
+    revenue: 0,
+    crew_salary: 0,
+    charter_fee: 0,
+    port_auth: 0,
+    berth: 0,
+    allowance: 0,
+    other_port: 0,
+    fuel_do: 0,
+    vendor_cost: 0,
+    hull_insurance: 0,
+    supplies: 0,
+    repair_drydock: 0,
+    social_insurance: 0,
+    storage_fee: 0,
+    total_cost: 0,
+    net_profit: 0,
+  });
+
+  const monthlyMap = new Map();
+  for (const c of bargeCodes) monthlyMap.set(c, emptyBucket(c));
+  const ensure = (code) => {
+    if (!monthlyMap.has(code)) monthlyMap.set(code, emptyBucket(code));
+    return monthlyMap.get(code);
+  };
+
+  const ytdMatrix = new Map();
+  const addYtd = (code, ym, revDelta, costDelta) => {
+    if (!ym || !String(ym).startsWith(yearPrefix)) return;
+    const mNum = Number(String(ym).slice(5, 7));
+    if (!mNum || mNum < 1 || mNum > 12) return;
+    if (!ytdMatrix.has(code)) ytdMatrix.set(code, {});
+    const row = ytdMatrix.get(code);
+    if (!row[mNum]) row[mNum] = { revenue: 0, cost: 0, profit: 0 };
+    row[mNum].revenue += revDelta;
+    row[mNum].cost += costDelta;
+    row[mNum].profit = row[mNum].revenue - row[mNum].cost;
+  };
+
+  for (const c of db.voyageContainers || []) {
+    const ym = String(c.departure_date || c.created_at || '').slice(0, 7);
+    if (!ym.startsWith(yearPrefix)) continue;
+    const barge = normBarge(c.barge_code);
+    const rev = Number(c.total_amount || 0);
+    addYtd(barge, ym, rev, 0);
+    if (ym === periodMonth) ensure(barge).revenue += rev;
+  }
+
+  for (const r of db.accountingFixedCosts || []) {
+    if (!String(r.period_month || '').startsWith(yearPrefix)) continue;
+    const barge = normBarge(r.vessel_code);
+    const sum =
+      Number(r.charter_fee || 0) +
+      Number(r.crew_salary || 0) +
+      Number(r.social_insurance || 0) +
+      Number(r.hull_insurance || 0) +
+      Number(r.storage_fee || 0);
+    addYtd(barge, r.period_month, 0, sum);
+    if (r.period_month === periodMonth) {
+      const b = ensure(barge);
+      b.charter_fee += Number(r.charter_fee || 0);
+      b.crew_salary += Number(r.crew_salary || 0);
+      b.social_insurance += Number(r.social_insurance || 0);
+      b.hull_insurance += Number(r.hull_insurance || 0);
+      b.storage_fee += Number(r.storage_fee || 0);
+    }
+  }
+
+  for (const r of db.accountingPortExpenses || []) {
+    if (!String(r.period_month || '').startsWith(yearPrefix)) continue;
+    const barge = normBarge(r.vessel_code);
+    const amt = Number(r.amount || 0);
+    addYtd(barge, r.period_month, 0, amt);
+    if (r.period_month === periodMonth) {
+      const b = ensure(barge);
+      const cat = String(r.category || 'PORT_AUTH').toUpperCase();
+      if (cat === 'PORT_AUTH') b.port_auth += amt;
+      else if (cat === 'BERTH') b.berth += amt;
+      else if (cat === 'ALLOWANCE') b.allowance += amt;
+      else b.other_port += amt;
+    }
+  }
+
+  for (const r of db.accountingFuelEntries || []) {
+    if (!String(r.period_month || '').startsWith(yearPrefix)) continue;
+    if (String(r.entry_type || '').toUpperCase() !== 'BUNKERING' && Number(r.total_amount || 0) === 0) continue;
+    const barge = normBarge(r.vessel_code);
+    const amt = Number(r.total_amount || 0);
+    addYtd(barge, r.period_month, 0, amt);
+    if (r.period_month === periodMonth) ensure(barge).fuel_do += amt;
+  }
+
+  for (const r of db.accountingSupplies || []) {
+    if (!String(r.period_month || '').startsWith(yearPrefix)) continue;
+    const barge = normBarge(r.vessel_code);
+    const amt = Number(r.total_amount || 0);
+    addYtd(barge, r.period_month, 0, amt);
+    if (r.period_month === periodMonth) {
+      const b = ensure(barge);
+      if (String(r.category || '').toUpperCase() === 'SUPPLIES') b.supplies += amt;
+      else b.repair_drydock += amt;
+    }
+  }
+
+  for (const r of db.accountingVendorCosts || []) {
+    if (!String(r.period_month || '').startsWith(yearPrefix)) continue;
+    const amt = Number(r.total_amount || 0);
+    addYtd('VENDOR', r.period_month, 0, amt);
+    if (r.period_month === periodMonth) ensure('VENDOR').vendor_cost += amt;
+  }
+
+  const byBarge = Array.from(monthlyMap.values()).map((b) => {
+    b.total_cost =
+      b.crew_salary +
+      b.charter_fee +
+      b.port_auth +
+      b.berth +
+      b.allowance +
+      b.other_port +
+      b.fuel_do +
+      b.vendor_cost +
+      b.hull_insurance +
+      b.supplies +
+      b.repair_drydock +
+      b.social_insurance +
+      b.storage_fee;
+    b.net_profit = b.revenue - b.total_cost;
+    return b;
+  });
+
+  const summary = byBarge.reduce(
+    (acc, b) => {
+      acc.revenue += b.revenue;
+      acc.crew_salary += b.crew_salary;
+      acc.charter_fee += b.charter_fee;
+      acc.port_auth += b.port_auth;
+      acc.berth += b.berth;
+      acc.allowance += b.allowance;
+      acc.other_port += b.other_port;
+      acc.fuel_do += b.fuel_do;
+      acc.vendor_cost += b.vendor_cost;
+      acc.hull_insurance += b.hull_insurance;
+      acc.supplies += b.supplies;
+      acc.repair_drydock += b.repair_drydock;
+      acc.social_insurance += b.social_insurance;
+      acc.storage_fee += b.storage_fee;
+      acc.total_cost += b.total_cost;
+      acc.net_profit += b.net_profit;
+      return acc;
+    },
+    emptyBucket('TOTAL'),
+  );
+
+  const yearlyByBarge = Array.from(ytdMatrix.entries()).map(([vessel_code, months]) => ({
+    vessel_code,
+    months,
+    total_revenue: Object.values(months).reduce((s, x) => s + x.revenue, 0),
+    total_cost: Object.values(months).reduce((s, x) => s + x.cost, 0),
+    total_profit: Object.values(months).reduce((s, x) => s + x.profit, 0),
+  }));
+
+  return { period_month: periodMonth, year, month, summary, by_barge: byBarge, yearly_by_barge: yearlyByBarge };
 }
 
 async function readBody(req) {
@@ -851,6 +1051,191 @@ const server = http.createServer(async (req, res) => {
         saveDb(db);
       }
       return send(res, 200, inv || { ok: true });
+    }
+
+    // --- ACCOUNTING MODULES ---
+    if (m === 'GET' && p === '/api/orders/accounting/pnl') {
+      const now = new Date();
+      const y = Number(url.searchParams.get('year')) || now.getFullYear();
+      const mo = Number(url.searchParams.get('month')) || now.getMonth() + 1;
+      return send(res, 200, computeAccountingPnl(db, y, mo));
+    }
+
+    const accListMatch = p.match(/^\/api\/orders\/accounting\/([^/]+)$/);
+    if (accListMatch && m === 'GET' && ACC_COLLECTION_MAP[accListMatch[1]]) {
+      const key = ACC_COLLECTION_MAP[accListMatch[1]];
+      let rows = [...(db[key] || [])];
+      const fMonth = url.searchParams.get('month');
+      const fVessel = url.searchParams.get('vessel_code');
+      const fCat = url.searchParams.get('category');
+      if (fMonth) rows = rows.filter((r) => r.period_month === fMonth);
+      if (fVessel) rows = rows.filter((r) => String(r.vessel_code || '').toUpperCase() === fVessel.toUpperCase());
+      if (fCat) rows = rows.filter((r) => String(r.category || '').toUpperCase() === fCat.toUpperCase());
+      return send(res, 200, rows);
+    }
+
+    const accDelMatch = p.match(/^\/api\/orders\/accounting\/([^/]+)\/([^/]+)$/);
+    if (accDelMatch && m === 'DELETE' && ACC_COLLECTION_MAP[accDelMatch[1]]) {
+      const key = ACC_COLLECTION_MAP[accDelMatch[1]];
+      db[key] = (db[key] || []).filter((r) => r.id !== accDelMatch[2]);
+      saveDb(db);
+      return send(res, 200, { ok: true });
+    }
+
+    if (m === 'POST' && p === '/api/orders/accounting/fixed-costs') {
+      const body = await readBody(req);
+      const periodMonth = String(body.period_month || new Date().toISOString().slice(0, 7));
+      const vesselCode = body.vessel_code ? String(body.vessel_code).trim().toUpperCase() : null;
+      const payload = {
+        period_month: periodMonth,
+        vessel_id: body.vessel_id || null,
+        vessel_code: vesselCode,
+        vessel_name: body.vessel_name || vesselCode,
+        charter_fee: Number(body.charter_fee || 0),
+        crew_salary: Number(body.crew_salary || 0),
+        social_insurance: Number(body.social_insurance || 0),
+        hull_insurance: Number(body.hull_insurance || 0),
+        storage_fee: Number(body.storage_fee || 0),
+        notes: body.notes || null,
+        updated_at: nowIso(),
+      };
+      if (body.id) {
+        const idx = db.accountingFixedCosts.findIndex((r) => r.id === body.id);
+        if (idx >= 0) {
+          db.accountingFixedCosts[idx] = { ...db.accountingFixedCosts[idx], ...payload };
+          saveDb(db);
+          return send(res, 200, db.accountingFixedCosts[idx]);
+        }
+      }
+      const created = { id: uuid(), ...payload, created_at: nowIso() };
+      db.accountingFixedCosts.unshift(created);
+      saveDb(db);
+      return send(res, 201, created);
+    }
+
+    if (m === 'POST' && p === '/api/orders/accounting/port-expenses') {
+      const body = await readBody(req);
+      const expDate = body.expense_date ? String(body.expense_date).slice(0, 10) : null;
+      const vesselCode = body.vessel_code ? String(body.vessel_code).trim().toUpperCase() : null;
+      const created = {
+        id: uuid(),
+        period_month: String(body.period_month || (expDate ? expDate.slice(0, 7) : new Date().toISOString().slice(0, 7))),
+        expense_date: expDate,
+        trip_no: body.trip_no || null,
+        vessel_id: body.vessel_id || null,
+        vessel_code: vesselCode,
+        vessel_name: body.vessel_name || vesselCode,
+        category: String(body.category || 'PORT_AUTH').toUpperCase(),
+        amount: Number(body.amount || 0),
+        description: body.description || null,
+        created_at: nowIso(),
+      };
+      db.accountingPortExpenses.unshift(created);
+      saveDb(db);
+      return send(res, 201, created);
+    }
+
+    if (m === 'POST' && p === '/api/orders/accounting/fuel-entries') {
+      const body = await readBody(req);
+      const entryDate = body.entry_date ? String(body.entry_date).slice(0, 10) : null;
+      const vesselCode = body.vessel_code ? String(body.vessel_code).trim().toUpperCase() : null;
+      const litersBunkered = Number(body.liters_bunkered || 0);
+      const unitPrice = Number(body.unit_price || 0);
+      const discount = Number(body.discount || 0);
+      const total =
+        body.total_amount !== undefined && body.total_amount !== ''
+          ? Number(body.total_amount)
+          : Math.max(0, litersBunkered * unitPrice - discount);
+      const created = {
+        id: uuid(),
+        period_month: String(body.period_month || (entryDate ? entryDate.slice(0, 7) : new Date().toISOString().slice(0, 7))),
+        entry_date: entryDate,
+        vessel_id: body.vessel_id || null,
+        vessel_code: vesselCode,
+        vessel_name: body.vessel_name || vesselCode,
+        entry_type: String(body.entry_type || 'CONSUMPTION').toUpperCase(),
+        route_label: body.route_label || null,
+        liters_consumed: Number(body.liters_consumed || 0),
+        liters_bunkered: litersBunkered,
+        unit_price: unitPrice,
+        discount,
+        total_amount: total,
+        notes: body.notes || null,
+        created_at: nowIso(),
+      };
+      db.accountingFuelEntries.unshift(created);
+      saveDb(db);
+      return send(res, 201, created);
+    }
+
+    if (m === 'POST' && p === '/api/orders/accounting/supplies') {
+      const body = await readBody(req);
+      const entryDate = body.entry_date ? String(body.entry_date).slice(0, 10) : null;
+      const vesselCode = body.vessel_code ? String(body.vessel_code).trim().toUpperCase() : null;
+      const qty = Number(body.quantity ?? 1);
+      const price = Number(body.unit_price || 0);
+      const vat = Number(body.vat_rate ?? 8);
+      const total =
+        body.total_amount !== undefined && body.total_amount !== ''
+          ? Number(body.total_amount)
+          : Math.round(qty * price * (1 + vat / 100));
+      const created = {
+        id: uuid(),
+        period_month: String(body.period_month || (entryDate ? entryDate.slice(0, 7) : new Date().toISOString().slice(0, 7))),
+        entry_date: entryDate,
+        vessel_id: body.vessel_id || null,
+        vessel_code: vesselCode,
+        vessel_name: body.vessel_name || vesselCode,
+        category: String(body.category || 'SUPPLIES').toUpperCase(),
+        item_name: String(body.item_name || '').trim() || 'Vật tư sà lan',
+        unit: body.unit || null,
+        quantity: qty,
+        unit_price: price,
+        vat_rate: vat,
+        total_amount: total,
+        invoice_no: body.invoice_no || null,
+        notes: body.notes || null,
+        created_at: nowIso(),
+      };
+      db.accountingSupplies.unshift(created);
+      saveDb(db);
+      return send(res, 201, created);
+    }
+
+    if (m === 'POST' && p === '/api/orders/accounting/vendor-costs') {
+      const body = await readBody(req);
+      const pickupDate = body.pickup_date ? String(body.pickup_date).slice(0, 10) : null;
+      const unitPrice = Number(body.unit_price || 0);
+      const fuelSurcharge = Number(body.fuel_surcharge || 0);
+      const vat = Number(body.vat_rate ?? 8);
+      const total =
+        body.total_amount !== undefined && body.total_amount !== ''
+          ? Number(body.total_amount)
+          : Math.round((unitPrice + fuelSurcharge) * (1 + vat / 100));
+      const created = {
+        id: uuid(),
+        period_month: String(body.period_month || (pickupDate ? pickupDate.slice(0, 7) : new Date().toISOString().slice(0, 7))),
+        pickup_date: pickupDate,
+        vendor_name: body.vendor_name || null,
+        shipping_line: body.shipping_line || null,
+        booking_no: body.booking_no ? String(body.booking_no).trim().toUpperCase() : null,
+        container_no: body.container_no ? String(body.container_no).trim().toUpperCase() : null,
+        cont_type: String(body.cont_type || '20F').toUpperCase(),
+        vendor_barge: body.vendor_barge || null,
+        origin_name: body.origin_name || null,
+        destination_name: body.destination_name || null,
+        freight_term: body.freight_term || 'FI-FO',
+        fuel_surcharge: fuelSurcharge,
+        unit_price: unitPrice,
+        vat_rate: vat,
+        total_amount: total,
+        invoice_no: body.invoice_no || null,
+        notes: body.notes || null,
+        created_at: nowIso(),
+      };
+      db.accountingVendorCosts.unshift(created);
+      saveDb(db);
+      return send(res, 201, created);
     }
 
     // --- TRACKING / FUEL / MAINTENANCE / MOBILE ---

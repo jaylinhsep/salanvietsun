@@ -596,3 +596,121 @@ export const FALLBACK_MAINTENANCE: MaintenanceOrder[] = [
 export function formatVND(amount: number): string {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
 }
+
+export interface AccountingFixedCost {
+  id: string;
+  period_month: string;
+  vessel_id?: string | null;
+  vessel_code?: string | null;
+  vessel_name?: string | null;
+  charter_fee: number;
+  crew_salary: number;
+  social_insurance: number;
+  hull_insurance: number;
+  storage_fee: number;
+  notes?: string | null;
+}
+
+export interface AccountingPortExpense {
+  id: string;
+  period_month: string;
+  expense_date?: string | null;
+  trip_no?: string | null;
+  vessel_id?: string | null;
+  vessel_code?: string | null;
+  vessel_name?: string | null;
+  category: 'PORT_AUTH' | 'BERTH' | 'ALLOWANCE' | 'OTHER';
+  amount: number;
+  description?: string | null;
+}
+
+export interface AccountingFuelEntry {
+  id: string;
+  period_month: string;
+  entry_date?: string | null;
+  vessel_id?: string | null;
+  vessel_code?: string | null;
+  vessel_name?: string | null;
+  entry_type: 'CARRY_OVER' | 'BUNKERING' | 'CONSUMPTION';
+  route_label?: string | null;
+  liters_consumed: number;
+  liters_bunkered: number;
+  unit_price: number;
+  discount: number;
+  total_amount: number;
+  notes?: string | null;
+}
+
+export interface AccountingSupply {
+  id: string;
+  period_month: string;
+  entry_date?: string | null;
+  vessel_id?: string | null;
+  vessel_code?: string | null;
+  vessel_name?: string | null;
+  category: 'SUPPLIES' | 'REPAIR' | 'DRYDOCK';
+  item_name: string;
+  unit?: string | null;
+  quantity: number;
+  unit_price: number;
+  vat_rate: number;
+  total_amount: number;
+  invoice_no?: string | null;
+  notes?: string | null;
+}
+
+export interface AccountingVendorCost {
+  id: string;
+  period_month: string;
+  pickup_date?: string | null;
+  vendor_name?: string | null;
+  shipping_line?: string | null;
+  booking_no?: string | null;
+  container_no?: string | null;
+  cont_type: string;
+  vendor_barge?: string | null;
+  origin_name?: string | null;
+  destination_name?: string | null;
+  freight_term?: string | null;
+  fuel_surcharge: number;
+  unit_price: number;
+  vat_rate: number;
+  total_amount: number;
+  invoice_no?: string | null;
+  notes?: string | null;
+}
+
+export interface PnlBucket {
+  vessel_code: string;
+  revenue: number;
+  crew_salary: number;
+  charter_fee: number;
+  port_auth: number;
+  berth: number;
+  allowance: number;
+  other_port: number;
+  fuel_do: number;
+  vendor_cost: number;
+  hull_insurance: number;
+  supplies: number;
+  repair_drydock: number;
+  social_insurance: number;
+  storage_fee: number;
+  total_cost: number;
+  net_profit: number;
+}
+
+export interface MonthlyPnlReport {
+  period_month: string;
+  year: number;
+  month: number;
+  summary: PnlBucket;
+  by_barge: PnlBucket[];
+  yearly_by_barge: Array<{
+    vessel_code: string;
+    months: Record<number, { revenue: number; cost: number; profit: number }>;
+    total_revenue: number;
+    total_cost: number;
+    total_profit: number;
+  }>;
+}
