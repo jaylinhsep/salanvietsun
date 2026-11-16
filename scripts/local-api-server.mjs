@@ -570,6 +570,29 @@ const server = http.createServer(async (req, res) => {
         updated_at: nowIso(),
       };
       next.total_teus = computeTeus(next.cont_20e, next.cont_20f, next.cont_40e, next.cont_40f);
+      if (prev.voyage_id) {
+        const vy = db.voyages.find((v) => v.id === prev.voyage_id);
+        if (vy) {
+          const vessel = db.vessels.find((v) => v.id === vy.vessel_id);
+          const d20e = next.cont_20e - Number(prev.cont_20e || 0);
+          const d20f = next.cont_20f - Number(prev.cont_20f || 0);
+          const d40e = next.cont_40e - Number(prev.cont_40e || 0);
+          const d40f = next.cont_40f - Number(prev.cont_40f || 0);
+          const dTeus = next.total_teus - Number(prev.total_teus || 0);
+          const projected = Number(vy.total_teus || 0) + dTeus;
+          const maxTeu = Number(vessel?.capacity_teu || 0);
+          if (dTeus > 0 && vessel && projected > maxTeu) {
+            return send(res, 400, {
+              message: `Vượt sức chở của sà lan ${vessel.name} (${projected} TEU > tối đa ${maxTeu} TEU).`,
+            });
+          }
+          vy.cont_20e = Math.max(0, Number(vy.cont_20e || 0) + d20e);
+          vy.cont_20f = Math.max(0, Number(vy.cont_20f || 0) + d20f);
+          vy.cont_40e = Math.max(0, Number(vy.cont_40e || 0) + d40e);
+          vy.cont_40f = Math.max(0, Number(vy.cont_40f || 0) + d40f);
+          vy.total_teus = Math.max(0, projected);
+        }
+      }
       db.bookings[idx] = next;
       saveDb(db);
       return send(res, 200, hydrateBooking(db, next));

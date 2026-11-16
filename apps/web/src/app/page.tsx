@@ -36,6 +36,7 @@ import {
 } from '@/lib/workflow-store';
 import { MapView } from '@/components/MapView';
 import { StatusBadge } from '@/components/StatusBadge';
+import { VoyageOverviewModal } from '@/components/VoyageOverviewModal';
 
 function toLocalDateTimeInput(iso?: string): string {
   const d = iso ? new Date(iso) : new Date(Date.now() + 8 * 3600 * 1000);
@@ -54,6 +55,7 @@ export default function DispatchCenterHomePage() {
   const [selectedBookingIds, setSelectedBookingIds] = useState<string[]>([]);
   const [draggedBookingId, setDraggedBookingId] = useState<string | null>(null);
   const [mapVesselId, setMapVesselId] = useState<string | null>(null);
+  const [overviewVoyageId, setOverviewVoyageId] = useState<string | null>(null);
   const [onlyUrgent, setOnlyUrgent] = useState(false);
 
   // Quick Create / Edit Booking Modal
@@ -726,12 +728,23 @@ export default function DispatchCenterHomePage() {
                     </div>
                   )}
 
-                  {/* Active Voyage Box */}
+                  {/* Active Voyage Box (Clickable -> opens Voyage Overview & TEU Breakdown Popup) */}
                   {activeVy ? (
-                    <div className="rounded-lg bg-slate-50 border border-slate-200 p-2.5 space-y-2 text-xs">
+                    <div
+                      onClick={() => setOverviewVoyageId(activeVy.id)}
+                      className="rounded-lg bg-slate-50 border border-slate-200 hover:border-maritime-400 hover:bg-sky-50/40 cursor-pointer transition-colors p-2.5 space-y-2 text-xs"
+                      title="Bấm để mở popup tổng thể chuyến & thêm/bớt số TEU từng booking"
+                    >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-navy-900">{activeVy.voyage_no}</span>
-                        <StatusBadge status={activeVy.status} />
+                        <span className="font-bold text-navy-900 underline decoration-dotted">
+                          {activeVy.voyage_no}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-medium text-maritime-700 bg-sky-100 px-1.5 py-0.5 rounded">
+                            Xem tổng thể
+                          </span>
+                          <StatusBadge status={activeVy.status} />
+                        </div>
                       </div>
                       <div className="flex items-center justify-between text-slate-700">
                         <span className="font-medium">
@@ -748,7 +761,10 @@ export default function DispatchCenterHomePage() {
 
                       {/* Linked Bookings List with Individual Unassign */}
                       {attachedBookings.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        <div
+                          className="flex flex-wrap gap-1.5 pt-0.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {attachedBookings.map((ab) => (
                             <span
                               key={ab.id}
@@ -760,7 +776,10 @@ export default function DispatchCenterHomePage() {
                               {activeVy.status === 'PLANNED' && (
                                 <button
                                   type="button"
-                                  onClick={() => handleUnassignBooking(ab)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleUnassignBooking(ab);
+                                  }}
                                   className="ml-0.5 text-rose-500 hover:text-rose-700 font-bold"
                                   title={`Bớt booking ${ab.booking_no} trả về hàng chờ`}
                                 >
@@ -778,7 +797,10 @@ export default function DispatchCenterHomePage() {
 
                       {/* Manage PLANNED Voyage: Edit or Release back to Pending */}
                       {activeVy.status === 'PLANNED' && (
-                        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-200">
+                        <div
+                          className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-200"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <button
                             type="button"
                             onClick={() => handleOpenEditVoyageModal(activeVy)}
@@ -1256,6 +1278,22 @@ export default function DispatchCenterHomePage() {
           </form>
         </div>
       )}
+
+      {/* Voyage Overview & Inline Booking TEU Adjustment Popup */}
+      {(() => {
+        const overviewVoyage = voyages.find((vy) => vy.id === overviewVoyageId);
+        if (!overviewVoyage) return null;
+        const overviewVessel = vessels.find((v) => v.id === overviewVoyage.vessel_id) || null;
+        return (
+          <VoyageOverviewModal
+            voyage={overviewVoyage}
+            vessel={overviewVessel}
+            allBookings={bookings}
+            onClose={() => setOverviewVoyageId(null)}
+            onChanged={refresh}
+          />
+        );
+      })()}
     </div>
   );
 }

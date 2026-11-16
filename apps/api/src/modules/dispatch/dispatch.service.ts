@@ -736,52 +736,120 @@ export class DispatchService implements OnModuleInit {
   }
 
   async updateBooking(id: string, dto: any) {
-    const b = this.normalizeBookingFields(dto);
-    const res = await this.db.query(
-      `
-      UPDATE bookings
-      SET
-        booking_no = $2,
-        cargo_direction = $3,
-        customer_id = $4,
-        customer_name = $5,
-        origin_port_id = $6,
-        origin_name = $7,
-        destination_port_id = $8,
-        dest_name = $9,
-        cont_20e = $10,
-        cont_20f = $11,
-        cont_40e = $12,
-        cont_40f = $13,
-        total_teus = $14,
-        closing_time = $15,
-        estimated_freight = $16,
-        notes = $17,
-        updated_at = NOW()
-      WHERE id = $1
-      RETURNING *
-      `,
-      [
-        id,
-        b.booking_no,
-        b.cargo_direction,
-        b.customer_id,
-        b.customer_name,
-        b.origin_port_id,
-        b.origin_name,
-        b.destination_port_id,
-        b.dest_name,
-        b.c20e,
-        b.c20f,
-        b.c40e,
-        b.c40f,
-        b.totalTeus,
-        b.closing_time,
-        b.estimated_freight,
-        b.notes,
-      ],
-    );
-    return res.rows[0];
+    return this.db.transaction(async (client) => {
+      const prevRes = await client.query(`SELECT * FROM bookings WHERE id = $1`, [id]);
+      const prev = prevRes.rows[0];
+      if (!prev) throw new BadRequestException('Không tìm thấy booking.');
+
+      const mergedDto = {
+        booking_no: dto.booking_no ?? prev.booking_no,
+        cargo_direction: dto.cargo_direction ?? prev.cargo_direction,
+        customer_id: dto.customer_id !== undefined ? dto.customer_id : prev.customer_id,
+        customer_name: dto.customer_name !== undefined ? dto.customer_name : prev.customer_name,
+        origin_port_id: dto.origin_port_id !== undefined ? dto.origin_port_id : prev.origin_port_id,
+        origin_name: dto.origin_name !== undefined ? dto.origin_name : prev.origin_name,
+        destination_port_id:
+          dto.destination_port_id !== undefined ? dto.destination_port_id : prev.destination_port_id,
+        dest_name: dto.dest_name !== undefined ? dto.dest_name : prev.dest_name,
+        cont_20e: dto.cont_20e ?? prev.cont_20e,
+        cont_20f: dto.cont_20f ?? prev.cont_20f,
+        cont_40e: dto.cont_40e ?? prev.cont_40e,
+        cont_40f: dto.cont_40f ?? prev.cont_40f,
+        closing_time: dto.closing_time !== undefined ? dto.closing_time : prev.closing_time,
+        estimated_freight:
+          dto.estimated_freight !== undefined ? dto.estimated_freight : prev.estimated_freight,
+        notes: dto.notes !== undefined ? dto.notes : prev.notes,
+      };
+      const b = this.normalizeBookingFields(mergedDto);
+
+      if (prev.voyage_id) {
+        const d20e = b.c20e - Number(prev.cont_20e || 0);
+        const d20f = b.c20f - Number(prev.cont_20f || 0);
+        const d40e = b.c40e - Number(prev.cont_40e || 0);
+        const d40f = b.c40f - Number(prev.cont_40f || 0);
+        const dTeus = b.totalTeus - Number(prev.total_teus || 0);
+
+        const vyRes = await client.query(
+          `
+          SELECT vy.id, vy.status, COALESCE(vy.total_teus, 0)::int AS total_teus,
+                 v.name AS vessel_name, COALESCE(v.capacity_teu, 0)::int AS capacity_teu
+          FROM voyages vy
+          LEFT JOIN vessels v ON v.id = vy.vessel_id
+          WHERE vy.id = $1
+          `,
+          [prev.voyage_id],
+        );
+        const vy = vyRes.rows[0];
+        if (vy) {
+          const projected = Number(vy.total_teus || 0) + dTeus;
+          const maxTeu = Number(vy.capacity_teu || 0);
+          if (dTeus > 0 && projected > maxTeu) {
+            throw new BadRequestException(
+              `Vượt sức chở của sà lan ${vy.vessel_name || ''} (${projected} TEU > tối đa ${maxTeu} TEU).`,
+            );
+          }
+          await client.query(
+            `
+            UPDATE voyages
+            SET
+              cont_20e = GREATEST(0, COALESCE(cont_20e, 0) + $2),
+              cont_20f = GREATEST(0, COALESCE(cont_20f, 0) + $3),
+              cont_40e = GREATEST(0, COALESCE(cont_40e, 0) + $4),
+              cont_40f = GREATEST(0, COALESCE(cont_40f, 0) + $5),
+              total_teus = GREATEST(0, COALESCE(total_teus, 0) + $6)
+            WHERE id = $1
+            `,
+            [prev.voyage_id, d20e, d20f, d40e, d40f, dTeus],
+          );
+        }
+      }
+
+      const res = await client.query(
+        `
+        UPDATE bookings
+        SET
+          booking_no = $2,
+          cargo_direction = $3,
+          customer_id = $4,
+          customer_name = $5,
+          origin_port_id = $6,
+          origin_name = $7,
+          destination_port_id = $8,
+          dest_name = $9,
+          cont_20e = $10,
+          cont_20f = $11,
+          cont_40e = $12,
+          cont_40f = $13,
+          total_teus = $14,
+          closing_time = $15,
+          estimated_freight = $16,
+          notes = $17,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        `,
+        [
+          id,
+          b.booking_no,
+          b.cargo_direction,
+          b.customer_id,
+          b.customer_name,
+          b.origin_port_id,
+          b.origin_name,
+          b.destination_port_id,
+          b.dest_name,
+          b.c20e,
+          b.c20f,
+          b.c40e,
+          b.c40f,
+          b.totalTeus,
+          b.closing_time,
+          b.estimated_freight,
+          b.notes,
+        ],
+      );
+      return res.rows[0];
+    });
   }
 
   async deleteBooking(id: string) {

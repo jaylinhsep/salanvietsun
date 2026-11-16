@@ -355,10 +355,8 @@ export async function updateBookingAction(
     });
     if (res.ok) return (await res.json()) as Booking;
     if (!id.startsWith('bk-')) {
-      alert(
-        `Không thể lưu thay đổi lên Server API (${res.status}). Hãy cập nhật API mới nhất trên VPS để dùng tính năng Sửa Booking & Hàng Xuất/Nhập.`,
-      );
-      throw new Error(`HTTP ${res.status}`);
+      const errData = await res.json().catch(() => null);
+      throw new Error(errData?.message || `Không thể cập nhật booking (${res.status})`);
     }
   } catch (err) {
     if (!id.startsWith('bk-')) throw err;
