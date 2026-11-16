@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
       return [
         {
           source: '/api/:path*',
-          destination: process.env.DEV_API_PROXY || 'https://salan.vietsun.site/api/:path*',
+          destination: process.env.DEV_API_PROXY || 'http://127.0.0.1:4005/api/:path*',
         },
       ];
     }
