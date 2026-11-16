@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccountingSupply, API_URL, Vessel } from '@/lib/api';
 import { Plus, Trash2, Wrench } from 'lucide-react';
-import { currentYearMonth, formatMoney, mergeVesselCodes } from './accountingUtils';
+import { currentYearMonth, findLatestPeriodMonth, formatMoney, mergeVesselCodes } from './accountingUtils';
 
 const SUPPLY_CATEGORIES: Record<AccountingSupply['category'], string> = {
   SUPPLIES: 'Mua vật tư',
@@ -15,6 +15,7 @@ export function AccountingSuppliesPanel({ vessels }: { vessels: Vessel[] }) {
   const [periodMonth, setPeriodMonth] = useState(currentYearMonth());
   const [rows, setRows] = useState<AccountingSupply[]>([]);
   const bargeCodes = mergeVesselCodes(vessels);
+  const didAutoPick = useRef(false);
 
   const [form, setForm] = useState({
     entry_date: `${currentYearMonth()}-01`,
@@ -30,7 +31,17 @@ export function AccountingSuppliesPanel({ vessels }: { vessels: Vessel[] }) {
 
   const loadData = useCallback(async () => {
     const res = await fetch(`${API_URL}/orders/accounting/supplies?month=${periodMonth}`, { cache: 'no-store' });
-    if (res.ok) setRows(await res.json());
+    const data = res.ok ? await res.json() : [];
+    if (!didAutoPick.current && data.length === 0) {
+      didAutoPick.current = true;
+      const latest = await findLatestPeriodMonth(API_URL, 'supplies');
+      if (latest && latest !== periodMonth) {
+        setPeriodMonth(latest);
+        return;
+      }
+    }
+    didAutoPick.current = true;
+    setRows(data);
   }, [periodMonth]);
 
   useEffect(() => {

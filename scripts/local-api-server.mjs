@@ -116,6 +116,7 @@ function defaultSeedDb() {
     accountingFuelEntries: [],
     accountingSupplies: [],
     accountingVendorCosts: [],
+    accountingHistoricalMonthly: [],
   };
 }
 
@@ -133,6 +134,7 @@ function loadDb() {
     accountingFuelEntries: parsed.accountingFuelEntries || [],
     accountingSupplies: parsed.accountingSupplies || [],
     accountingVendorCosts: parsed.accountingVendorCosts || [],
+    accountingHistoricalMonthly: parsed.accountingHistoricalMonthly || [],
   };
 }
 
@@ -292,7 +294,7 @@ function computeAccountingPnl(db, year, month) {
   };
 
   for (const c of db.voyageContainers || []) {
-    const ym = String(c.departure_date || c.created_at || '').slice(0, 7);
+    const ym = String(c.accounting_month || c.departure_date || c.created_at || '').slice(0, 7);
     if (!ym.startsWith(yearPrefix)) continue;
     const barge = normBarge(c.barge_code);
     const rev = Number(c.total_amount || 0);
@@ -337,7 +339,8 @@ function computeAccountingPnl(db, year, month) {
 
   for (const r of db.accountingFuelEntries || []) {
     if (!String(r.period_month || '').startsWith(yearPrefix)) continue;
-    if (String(r.entry_type || '').toUpperCase() !== 'BUNKERING' && Number(r.total_amount || 0) === 0) continue;
+    const et = String(r.entry_type || '').toUpperCase();
+    if (et !== 'BUNKERING' && et !== 'CARRY_OVER' && Number(r.total_amount || 0) === 0) continue;
     const barge = normBarge(r.vessel_code);
     const amt = Number(r.total_amount || 0);
     addYtd(barge, r.period_month, 0, amt);
@@ -404,6 +407,23 @@ function computeAccountingPnl(db, year, month) {
     },
     emptyBucket('TOTAL'),
   );
+
+  // Merge imported historical monthly summary (e.g. T1..T9 from Excel TOTAL) when no detailed ledger exists
+  for (const h of db.accountingHistoricalMonthly || []) {
+    if (Number(h.year) !== Number(year)) continue;
+    const mNum = Number(h.month);
+    if (!mNum || mNum < 1 || mNum > 12) continue;
+    const code = normBarge(h.vessel_code);
+    if (!ytdMatrix.has(code)) ytdMatrix.set(code, {});
+    const row = ytdMatrix.get(code);
+    if (!row[mNum]) {
+      row[mNum] = {
+        revenue: Number(h.revenue || 0),
+        cost: Number(h.cost || 0),
+        profit: Number(h.profit ?? Number(h.revenue || 0) - Number(h.cost || 0)),
+      };
+    }
+  }
 
   const yearlyByBarge = Array.from(ytdMatrix.entries()).map(([vessel_code, months]) => ({
     vessel_code,

@@ -1,13 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccountingVendorCost, API_URL } from '@/lib/api';
 import { Download, Plus, Ship, Trash2 } from 'lucide-react';
-import { currentYearMonth, exportRowsToCsv, formatMoney } from './accountingUtils';
+import { currentYearMonth, exportRowsToCsv, findLatestPeriodMonth, formatMoney } from './accountingUtils';
 
 export function AccountingVendorPanel() {
   const [periodMonth, setPeriodMonth] = useState(currentYearMonth());
   const [rows, setRows] = useState<AccountingVendorCost[]>([]);
+  const didAutoPick = useRef(false);
 
   const [form, setForm] = useState({
     pickup_date: `${currentYearMonth()}-01`,
@@ -28,7 +29,17 @@ export function AccountingVendorPanel() {
 
   const loadData = useCallback(async () => {
     const res = await fetch(`${API_URL}/orders/accounting/vendor-costs?month=${periodMonth}`, { cache: 'no-store' });
-    if (res.ok) setRows(await res.json());
+    const data = res.ok ? await res.json() : [];
+    if (!didAutoPick.current && data.length === 0) {
+      didAutoPick.current = true;
+      const latest = await findLatestPeriodMonth(API_URL, 'vendor-costs');
+      if (latest && latest !== periodMonth) {
+        setPeriodMonth(latest);
+        return;
+      }
+    }
+    didAutoPick.current = true;
+    setRows(data);
   }, [periodMonth]);
 
   useEffect(() => {

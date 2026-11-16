@@ -47,6 +47,7 @@ export function AccountingOutputReportPanel() {
   const [bulkBaf, setBulkBaf] = useState<number>(172800);
   const [bulkFuelPrice, setBulkFuelPrice] = useState<number>(29250);
   const [busy, setBusy] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState<number>(100);
 
   const loadAllContainers = async () => {
     setLoading(true);
@@ -77,7 +78,8 @@ export function AccountingOutputReportPanel() {
   const filteredAndSorted = useMemo(() => {
     const filtered = rows.filter((r) => {
       const dep = (r.departure_date || '').slice(0, 10);
-      if (filterMonth && dep && !dep.startsWith(filterMonth)) return false;
+      const accMonth = ((r as any).accounting_month || dep).slice(0, 7);
+      if (filterMonth && accMonth !== filterMonth && !dep.startsWith(filterMonth)) return false;
       if (filterBarge && (r.barge_code || '') !== filterBarge) return false;
       if (
         filterTrip &&
@@ -521,7 +523,7 @@ export function AccountingOutputReportPanel() {
                   </td>
                 </tr>
               ) : (
-                filteredAndSorted.map((r, idx) => {
+                filteredAndSorted.slice(0, visibleLimit).map((r, idx) => {
                   const isEditing = editingId === r.id;
                   const isDup = duplicateSet.has((r.container_no || '').trim().toUpperCase());
 
@@ -679,6 +681,29 @@ export function AccountingOutputReportPanel() {
             </tbody>
           </table>
         </div>
+        {filteredAndSorted.length > visibleLimit && (
+          <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600">
+            <span>
+              Đang hiển thị {Math.min(visibleLimit, filteredAndSorted.length)} / {filteredAndSorted.length} container
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setVisibleLimit((v) => v + 200)}
+                className="px-3 py-1 rounded border border-slate-300 bg-white font-medium hover:bg-slate-100"
+              >
+                Xem thêm 200 dòng
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibleLimit(filteredAndSorted.length)}
+                className="px-3 py-1 rounded bg-navy-900 text-white font-medium hover:bg-navy-800"
+              >
+                Hiện tất cả ({filteredAndSorted.length})
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

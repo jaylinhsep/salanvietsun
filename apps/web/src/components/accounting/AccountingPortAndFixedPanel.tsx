@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccountingFixedCost,
   AccountingPortExpense,
@@ -8,7 +8,7 @@ import {
   Vessel,
 } from '@/lib/api';
 import { Anchor, Plus, Trash2 } from 'lucide-react';
-import { currentYearMonth, formatMoney, mergeVesselCodes } from './accountingUtils';
+import { currentYearMonth, findLatestPeriodMonth, formatMoney, mergeVesselCodes } from './accountingUtils';
 
 const PORT_CATEGORIES: Record<AccountingPortExpense['category'], string> = {
   PORT_AUTH: 'Cảng vụ',
@@ -22,6 +22,7 @@ export function AccountingPortAndFixedPanel({ vessels }: { vessels: Vessel[] }) 
   const [fixedRows, setFixedRows] = useState<AccountingFixedCost[]>([]);
   const [portRows, setPortRows] = useState<AccountingPortExpense[]>([]);
   const bargeCodes = mergeVesselCodes(vessels);
+  const didAutoPick = useRef(false);
 
   const [fixedForm, setFixedForm] = useState({
     vessel_code: 'NV18',
@@ -47,8 +48,19 @@ export function AccountingPortAndFixedPanel({ vessels }: { vessels: Vessel[] }) 
       fetch(`${API_URL}/orders/accounting/fixed-costs?month=${periodMonth}`, { cache: 'no-store' }),
       fetch(`${API_URL}/orders/accounting/port-expenses?month=${periodMonth}`, { cache: 'no-store' }),
     ]);
-    if (fRes.ok) setFixedRows(await fRes.json());
-    if (pRes.ok) setPortRows(await pRes.json());
+    const fData = fRes.ok ? await fRes.json() : [];
+    const pData = pRes.ok ? await pRes.json() : [];
+    if (!didAutoPick.current && fData.length === 0 && pData.length === 0) {
+      didAutoPick.current = true;
+      const latest = (await findLatestPeriodMonth(API_URL, 'fixed-costs')) || (await findLatestPeriodMonth(API_URL, 'port-expenses'));
+      if (latest && latest !== periodMonth) {
+        setPeriodMonth(latest);
+        return;
+      }
+    }
+    didAutoPick.current = true;
+    setFixedRows(fData);
+    setPortRows(pData);
   }, [periodMonth]);
 
   useEffect(() => {

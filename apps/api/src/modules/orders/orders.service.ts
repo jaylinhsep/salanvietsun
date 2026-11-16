@@ -645,7 +645,8 @@ export class OrdersService implements OnModuleInit {
     }
 
     for (const r of fuelRes.rows) {
-      if (String(r.entry_type || '').toUpperCase() !== 'BUNKERING' && Number(r.total_amount || 0) === 0) {
+      const et = String(r.entry_type || '').toUpperCase();
+      if (et !== 'BUNKERING' && et !== 'CARRY_OVER' && Number(r.total_amount || 0) === 0) {
         continue;
       }
       const c = normBarge(r.vessel_code);

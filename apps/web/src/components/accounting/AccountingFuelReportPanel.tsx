@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccountingFuelEntry, API_URL, Vessel } from '@/lib/api';
 import { Fuel, Plus, Trash2 } from 'lucide-react';
-import { currentYearMonth, formatMoney, mergeVesselCodes } from './accountingUtils';
+import { currentYearMonth, findLatestPeriodMonth, formatMoney, mergeVesselCodes } from './accountingUtils';
 
 const ENTRY_LABELS: Record<AccountingFuelEntry['entry_type'], string> = {
   CARRY_OVER: 'Tồn / Nợ kỳ trước',
@@ -16,6 +16,7 @@ export function AccountingFuelReportPanel({ vessels }: { vessels: Vessel[] }) {
   const [vesselFilter, setVesselFilter] = useState('ALL');
   const [rows, setRows] = useState<AccountingFuelEntry[]>([]);
   const bargeCodes = mergeVesselCodes(vessels);
+  const didAutoPick = useRef(false);
 
   const [form, setForm] = useState({
     entry_date: `${currentYearMonth()}-01`,
@@ -33,7 +34,17 @@ export function AccountingFuelReportPanel({ vessels }: { vessels: Vessel[] }) {
     const qs = new URLSearchParams({ month: periodMonth });
     if (vesselFilter !== 'ALL') qs.set('vessel_code', vesselFilter);
     const res = await fetch(`${API_URL}/orders/accounting/fuel-entries?${qs.toString()}`, { cache: 'no-store' });
-    if (res.ok) setRows(await res.json());
+    const data = res.ok ? await res.json() : [];
+    if (!didAutoPick.current && data.length === 0) {
+      didAutoPick.current = true;
+      const latest = await findLatestPeriodMonth(API_URL, 'fuel-entries');
+      if (latest && latest !== periodMonth) {
+        setPeriodMonth(latest);
+        return;
+      }
+    }
+    didAutoPick.current = true;
+    setRows(data);
   }, [periodMonth, vesselFilter]);
 
   useEffect(() => {

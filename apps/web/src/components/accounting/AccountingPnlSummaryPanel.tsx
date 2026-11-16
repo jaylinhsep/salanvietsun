@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_URL, MonthlyPnlReport, PnlBucket } from '@/lib/api';
 import { Download, RefreshCw, TrendingUp } from 'lucide-react';
 import { exportRowsToCsv, formatMoney } from './accountingUtils';
@@ -27,6 +27,7 @@ export function AccountingPnlSummaryPanel() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [report, setReport] = useState<MonthlyPnlReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const didAutoPick = useRef(false);
 
   const loadReport = useCallback(async () => {
     setLoading(true);
@@ -34,7 +35,30 @@ export function AccountingPnlSummaryPanel() {
       const res = await fetch(`${API_URL}/orders/accounting/pnl?year=${year}&month=${month}`, {
         cache: 'no-store',
       });
-      if (res.ok) setReport(await res.json());
+      if (res.ok) {
+        const data = (await res.json()) as MonthlyPnlReport;
+        if (
+          !didAutoPick.current &&
+          data.summary.revenue === 0 &&
+          data.summary.total_cost === 0 &&
+          data.yearly_by_barge?.length > 0
+        ) {
+          didAutoPick.current = true;
+          let latest = 0;
+          for (const row of data.yearly_by_barge) {
+            for (const [mStr, cell] of Object.entries(row.months || {})) {
+              const mNum = Number(mStr);
+              if (mNum > latest && (cell.revenue !== 0 || cell.cost !== 0)) latest = mNum;
+            }
+          }
+          if (latest > 0 && latest !== month) {
+            setMonth(latest);
+            return;
+          }
+        }
+        didAutoPick.current = true;
+        setReport(data);
+      }
     } finally {
       setLoading(false);
     }

@@ -27,3 +27,15 @@ export function mergeVesselCodes(vessels: Vessel[], extraCodes: (string | null |
   for (const c of extraCodes) if (c) set.add(c.toUpperCase());
   return Array.from(set).sort();
 }
+
+export async function findLatestPeriodMonth(apiUrl: string, kind: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${apiUrl}/orders/accounting/${kind}`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as Array<{ period_month?: string }>;
+    const months = rows.map((r) => r.period_month).filter((m): m is string => Boolean(m)).sort();
+    return months.length > 0 ? months[months.length - 1] : null;
+  } catch {
+    return null;
+  }
+}
