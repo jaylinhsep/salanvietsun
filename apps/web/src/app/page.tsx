@@ -363,9 +363,9 @@ export default function DispatchCenterHomePage() {
         </span>
       );
     }
-    if (vessel.status === 'IN_VOYAGE' || (activeVoyage && activeVoyage.status === 'IN_TRANSIT')) {
+    if (vessel.status === 'IN_VOYAGE' || (activeVoyage && ['IN_TRANSIT', 'DEPARTED'].includes(activeVoyage.status))) {
       return (
-        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-100 text-sky-800">
+        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-600 text-white shadow-sm">
           Đang chạy chuyến
         </span>
       );
@@ -690,6 +690,10 @@ export default function DispatchCenterHomePage() {
               const overAttach = canAssign && canAttachPlanned && projectedAttachTeus > maxTeu;
               const overNew = canAssign && dragFallbackTeus > maxTeu;
 
+              const isRunning =
+                v.status === 'IN_VOYAGE' ||
+                Boolean(activeVy && ['IN_TRANSIT', 'DEPARTED'].includes(activeVy.status));
+
               const currentStep = Number(activeVy?.workflow_step || 0);
               const stepLabel =
                 currentStep > 0
@@ -706,12 +710,14 @@ export default function DispatchCenterHomePage() {
                     e.preventDefault();
                     if (canAssign) handleAssignToBarge(v, canAttachPlanned);
                   }}
-                  className={`bg-white rounded-xl border p-4 shadow-sm transition-all space-y-3 ${
+                  className={`rounded-xl border p-4 shadow-sm transition-all space-y-3 ${
                     overNew && (!canAttachPlanned || overAttach)
                       ? 'border-rose-300 bg-rose-50/30'
-                      : canAssign
-                        ? 'border-indigo-300 ring-1 ring-indigo-100 hover:border-indigo-500'
-                        : 'border-slate-200'
+                      : isRunning
+                        ? 'bg-emerald-100/80 border-emerald-400 ring-1 ring-emerald-200'
+                        : canAssign
+                          ? 'bg-white border-indigo-300 ring-1 ring-indigo-100 hover:border-indigo-500'
+                          : 'bg-white border-slate-200'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -751,7 +757,11 @@ export default function DispatchCenterHomePage() {
                   {activeVy ? (
                     <div
                       onClick={() => setOverviewVoyageId(activeVy.id)}
-                      className="rounded-lg bg-slate-50 border border-slate-200 hover:border-maritime-400 hover:bg-sky-50/40 cursor-pointer transition-colors p-2.5 space-y-2 text-xs"
+                      className={`rounded-lg border cursor-pointer transition-colors p-2.5 space-y-2 text-xs ${
+                        isRunning
+                          ? 'bg-white/85 border-emerald-300 hover:border-emerald-500 hover:bg-white'
+                          : 'bg-slate-50 border-slate-200 hover:border-maritime-400 hover:bg-sky-50/40'
+                      }`}
                       title="Bấm để mở popup tổng thể chuyến & thêm/bớt số TEU từng booking"
                     >
                       <div className="flex items-center justify-between gap-2">
