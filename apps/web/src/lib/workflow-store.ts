@@ -348,8 +348,14 @@ export async function updateBookingAction(
       body: JSON.stringify(dto),
     });
     if (res.ok) return (await res.json()) as Booking;
-  } catch {
-    // Fallback to local store
+    if (!id.startsWith('bk-')) {
+      alert(
+        `Không thể lưu thay đổi lên Server API (${res.status}). Hãy cập nhật API mới nhất trên VPS để dùng tính năng Sửa Booking & Hàng Xuất/Nhập.`,
+      );
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch (err) {
+    if (!id.startsWith('bk-')) throw err;
   }
 
   let updatedRow: Booking | null = null;
