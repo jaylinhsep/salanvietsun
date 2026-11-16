@@ -14,6 +14,7 @@ import {
   PackagePlus,
   Pencil,
   Plus,
+  RotateCcw,
   Ship,
   Smartphone,
   Square,
@@ -28,7 +29,10 @@ import {
   deleteBookingAction,
   getClosingUrgency,
   loadWorkflowSnapshot,
+  releaseVoyageAction,
+  unassignBookingAction,
   updateBookingAction,
+  updateVoyageAction,
 } from '@/lib/workflow-store';
 import { MapView } from '@/components/MapView';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -71,6 +75,21 @@ export default function DispatchCenterHomePage() {
     closing_time: toLocalDateTimeInput(),
     estimated_freight: 12000000,
     notes: '',
+  });
+
+  // Edit Planned Voyage Modal
+  const [editingVoyage, setEditingVoyage] = useState<Voyage | null>(null);
+  const [voyageEditForm, setVoyageEditForm] = useState({
+    voyage_no: '',
+    vessel_id: '',
+    origin_port_id: '',
+    destination_port_id: '',
+    pic_name: '',
+    cont_20e: 0,
+    cont_20f: 0,
+    cont_40e: 0,
+    cont_40f: 0,
+    captain_notes: '',
   });
 
   const refresh = async () => {
@@ -235,14 +254,83 @@ export default function DispatchCenterHomePage() {
     if (targetBookings.length === 0) return;
 
     const existingVoyage = attachToExisting ? activeVoyageByVessel.get(vessel.id) || null : null;
-    await assignBookingsToBargeAction({
-      bookings: targetBookings,
-      vessel,
-      targetVoyage: existingVoyage,
+    try {
+      await assignBookingsToBargeAction({
+        bookings: targetBookings,
+        vessel,
+        targetVoyage: existingVoyage,
+      });
+      setSelectedBookingIds([]);
+      setDraggedBookingId(null);
+      await refresh();
+    } catch (err: any) {
+      alert(err?.message || 'Không thể ghép booking vào sà lan.');
+    }
+  };
+
+  const handleUnassignBooking = async (bk: Booking) => {
+    try {
+      await unassignBookingAction(bk.id);
+      await refresh();
+    } catch (err: any) {
+      alert(err?.message || 'Không thể nhả booking về chờ.');
+    }
+  };
+
+  const handleReleaseVoyage = async (vy: Voyage) => {
+    if (
+      !confirm(
+        `Nhả chuyến ${vy.voyage_no} về chế độ chờ? Toàn bộ booking thuộc chuyến này sẽ quay lại danh sách chờ xếp tàu.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await releaseVoyageAction(vy.id);
+      await refresh();
+    } catch (err: any) {
+      alert(err?.message || 'Không thể nhả chuyến về chế độ chờ.');
+    }
+  };
+
+  const handleOpenEditVoyageModal = (vy: Voyage) => {
+    setEditingVoyage(vy);
+    setVoyageEditForm({
+      voyage_no: vy.voyage_no,
+      vessel_id: vy.vessel_id || vessels[0]?.id || '',
+      origin_port_id: vy.origin_port_id || ports[0]?.id || '',
+      destination_port_id: vy.destination_port_id || ports[1]?.id || '',
+      pic_name: vy.pic_name || '',
+      cont_20e: Number(vy.cont_20e || 0),
+      cont_20f: Number(vy.cont_20f || 0),
+      cont_40e: Number(vy.cont_40e || 0),
+      cont_40f: Number(vy.cont_40f || 0),
+      captain_notes: vy.captain_notes || '',
     });
-    setSelectedBookingIds([]);
-    setDraggedBookingId(null);
-    await refresh();
+  };
+
+  const handleSaveVoyageEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingVoyage) return;
+    const nextTeus =
+      voyageEditForm.cont_20e +
+      voyageEditForm.cont_20f +
+      (voyageEditForm.cont_40e + voyageEditForm.cont_40f) * 2;
+    const targetVessel = vessels.find((v) => v.id === voyageEditForm.vessel_id);
+    const maxTeu = Number(targetVessel?.capacity_teu || 0);
+    if (targetVessel && nextTeus > maxTeu) {
+      alert(
+        `Vượt sức chở của sà lan ${targetVessel.name} (${nextTeus} TEU > tối đa ${maxTeu} TEU). Vui lòng giảm số cont hoặc chọn sà lan lớn hơn!`,
+      );
+      return;
+    }
+    try {
+      await updateVoyageAction(editingVoyage.id, voyageEditForm);
+      setEditingVoyage(null);
+      await refresh();
+    } catch (err: any) {
+      alert(err?.message || 'Không thể cập nhật chuyến.');
+    }
   };
 
   const mapVessel = useMemo(
@@ -567,7 +655,20 @@ export default function DispatchCenterHomePage() {
           >
             {groupedVessels.map((v) => {
               const activeVy = activeVoyageByVessel.get(v.id);
+              const attachedBookings = activeVy
+                ? bookings.filter((b) => b.voyage_id === activeVy.id)
+                : [];
+              const dragFallbackTeus =
+                selectedBookings.length === 0 && draggedBookingId
+                  ? Number(pendingBookings.find((b) => b.id === draggedBookingId)?.total_teus || 0)
+                  : selectedTeus;
               const canAssign = selectedBookings.length > 0 || draggedBookingId !== null;
+              const maxTeu = Number(v.capacity_teu || 0);
+              const canAttachPlanned = Boolean(activeVy && activeVy.status === 'PLANNED');
+              const projectedAttachTeus = Number(activeVy?.total_teus || 0) + dragFallbackTeus;
+              const overAttach = canAssign && canAttachPlanned && projectedAttachTeus > maxTeu;
+              const overNew = canAssign && dragFallbackTeus > maxTeu;
+
               const currentStep = Number(activeVy?.workflow_step || 0);
               const stepLabel =
                 currentStep > 0
@@ -582,12 +683,14 @@ export default function DispatchCenterHomePage() {
                   }}
                   onDrop={(e) => {
                     e.preventDefault();
-                    if (canAssign) handleAssignToBarge(v, Boolean(activeVy));
+                    if (canAssign) handleAssignToBarge(v, canAttachPlanned);
                   }}
                   className={`bg-white rounded-xl border p-4 shadow-sm transition-all space-y-3 ${
-                    canAssign
-                      ? 'border-indigo-300 ring-1 ring-indigo-100 hover:border-indigo-500'
-                      : 'border-slate-200'
+                    overNew && (!canAttachPlanned || overAttach)
+                      ? 'border-rose-300 bg-rose-50/30'
+                      : canAssign
+                        ? 'border-indigo-300 ring-1 ring-indigo-100 hover:border-indigo-500'
+                        : 'border-slate-200'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -598,7 +701,7 @@ export default function DispatchCenterHomePage() {
                         <span className="text-[11px] font-mono text-slate-500">{v.code}</span>
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5">
-                        Sức chở: <b>{v.capacity_teu || 0} TEU</b> ({v.capacity_tons}T) •{' '}
+                        Sức chở: <b>{maxTeu} TEU</b> ({v.capacity_tons}T) •{' '}
                         <Fuel className="w-3 h-3 inline text-emerald-600" /> Dầu:{' '}
                         <b>{Number(v.current_fuel_liters || 0).toLocaleString('vi-VN')} L</b>
                       </div>
@@ -606,10 +709,27 @@ export default function DispatchCenterHomePage() {
                     {bargeStageBadge(v, activeVy)}
                   </div>
 
+                  {/* Overload Warning Banner when Bookings are selected */}
+                  {canAssign && (overAttach || overNew) && (
+                    <div className="rounded-lg bg-rose-50 border border-rose-300 px-2.5 py-2 text-[11px] text-rose-800 font-semibold flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                      {canAttachPlanned && overAttach ? (
+                        <span>
+                          Vượt sức chở ghép thêm ({projectedAttachTeus} / {maxTeu} TEU) — Không thể ghép vào{' '}
+                          {activeVy?.voyage_no}
+                        </span>
+                      ) : (
+                        <span>
+                          Vượt sức chở sà lan ({dragFallbackTeus} / {maxTeu} TEU) — Không thể tạo chuyến mới
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {/* Active Voyage Box */}
                   {activeVy ? (
-                    <div className="rounded-lg bg-slate-50 border border-slate-200 p-2.5 space-y-1.5 text-xs">
-                      <div className="flex items-center justify-between">
+                    <div className="rounded-lg bg-slate-50 border border-slate-200 p-2.5 space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-navy-900">{activeVy.voyage_no}</span>
                         <StatusBadge status={activeVy.status} />
                       </div>
@@ -617,13 +737,65 @@ export default function DispatchCenterHomePage() {
                         <span className="font-medium">
                           {activeVy.origin_name || '—'} → {activeVy.dest_name || '—'}
                         </span>
-                        <span className="font-bold text-rose-700">{activeVy.total_teus || 0} TEUs</span>
+                        <span
+                          className={`font-bold ${
+                            Number(activeVy.total_teus || 0) > maxTeu ? 'text-rose-700' : 'text-maritime-700'
+                          }`}
+                        >
+                          {activeVy.total_teus || 0} / {maxTeu} TEUs
+                        </span>
                       </div>
-                      {activeVy.booking_nos && (
+
+                      {/* Linked Bookings List with Individual Unassign */}
+                      {attachedBookings.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {attachedBookings.map((ab) => (
+                            <span
+                              key={ab.id}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-200 text-[11px] text-indigo-800 font-medium"
+                            >
+                              <span>
+                                {ab.booking_no} ({ab.total_teus}T)
+                              </span>
+                              {activeVy.status === 'PLANNED' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnassignBooking(ab)}
+                                  className="ml-0.5 text-rose-500 hover:text-rose-700 font-bold"
+                                  title={`Bớt booking ${ab.booking_no} trả về hàng chờ`}
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      ) : activeVy.booking_nos ? (
                         <div className="text-[11px] text-indigo-700 font-medium">
                           Bookings: {activeVy.booking_nos}
                         </div>
+                      ) : null}
+
+                      {/* Manage PLANNED Voyage: Edit or Release back to Pending */}
+                      {activeVy.status === 'PLANNED' && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-200">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditVoyageModal(activeVy)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white border border-slate-300 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
+                          >
+                            <Pencil className="w-3 h-3 text-maritime-600" /> Sửa chuyến
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReleaseVoyage(activeVy)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-50 border border-amber-300 text-[11px] font-medium text-amber-800 hover:bg-amber-100"
+                          >
+                            <RotateCcw className="w-3 h-3" /> Nhả về chờ
+                          </button>
+                        </div>
                       )}
+
                       {/* 5-step progress */}
                       <div className="pt-1 flex items-center justify-between text-[11px]">
                         <span className="text-slate-500">Thuyền trưởng: {stepLabel}</span>
@@ -672,21 +844,23 @@ export default function DispatchCenterHomePage() {
 
                     {canAssign && v.status !== 'MAINTENANCE' && (
                       <div className="flex items-center gap-1.5">
-                        {activeVy ? (
+                        {canAttachPlanned && activeVy ? (
                           <button
                             type="button"
+                            disabled={overAttach}
                             onClick={() => handleAssignToBarge(v, true)}
-                            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-500 shadow-sm"
+                            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-500 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             + Ghép vào {activeVy.voyage_no}
                           </button>
                         ) : null}
                         <button
                           type="button"
+                          disabled={overNew}
                           onClick={() => handleAssignToBarge(v, false)}
-                          className="px-3 py-1.5 rounded-lg bg-maritime-600 text-white text-xs font-semibold hover:bg-maritime-500 shadow-sm"
+                          className="px-3 py-1.5 rounded-lg bg-maritime-600 text-white text-xs font-semibold hover:bg-maritime-500 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          {activeVy ? 'Tạo chuyến mới' : `Ghép ${selectedTeus} TEU vào tàu`}
+                          {activeVy ? 'Tạo chuyến mới' : `Ghép ${dragFallbackTeus} TEU vào tàu`}
                         </button>
                       </div>
                     )}
@@ -920,6 +1094,163 @@ export default function DispatchCenterHomePage() {
                 className="px-4 py-2 rounded-lg bg-maritime-600 text-white text-sm font-medium hover:bg-maritime-500"
               >
                 {editingBookingId ? 'Lưu thay đổi Booking' : 'Lưu Booking vào hàng chờ'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Edit Planned Voyage Modal */}
+      {editingVoyage && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveVoyageEdit}
+            className="bg-white rounded-xl max-w-lg w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between border-b pb-2.5">
+              <h3 className="font-bold text-lg text-slate-900">
+                Chỉnh sửa chuyến đang gom: {editingVoyage.voyage_no}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingVoyage(null)}
+                className="p-1 rounded hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <label className="text-xs font-medium text-slate-600">Số chuyến</label>
+                <input
+                  required
+                  className="w-full border rounded-lg px-3 py-2 mt-1 font-semibold uppercase"
+                  value={voyageEditForm.voyage_no}
+                  onChange={(e) =>
+                    setVoyageEditForm({ ...voyageEditForm, voyage_no: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">PIC điều độ</label>
+                <input
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={voyageEditForm.pic_name}
+                  onChange={(e) =>
+                    setVoyageEditForm({ ...voyageEditForm, pic_name: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="text-sm">
+              <label className="text-xs font-medium text-slate-600">Sà lan thực hiện</label>
+              <select
+                className="w-full border rounded-lg px-3 py-2 mt-1"
+                value={voyageEditForm.vessel_id}
+                onChange={(e) =>
+                  setVoyageEditForm({ ...voyageEditForm, vessel_id: e.target.value })
+                }
+              >
+                {vessels.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name} ({v.code}) — Sức chở tối đa {v.capacity_teu || 0} TEU
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <label className="text-xs font-medium text-slate-600">Cảng đi (POL)</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={voyageEditForm.origin_port_id}
+                  onChange={(e) =>
+                    setVoyageEditForm({ ...voyageEditForm, origin_port_id: e.target.value })
+                  }
+                >
+                  {ports.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.code} — {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">Cảng đến (POD)</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={voyageEditForm.destination_port_id}
+                  onChange={(e) =>
+                    setVoyageEditForm({ ...voyageEditForm, destination_port_id: e.target.value })
+                  }
+                >
+                  {ports.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.code} — {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                <span>Sản lượng Cont</span>
+                <span className="text-rose-700">
+                  Tổng:{' '}
+                  {voyageEditForm.cont_20e +
+                    voyageEditForm.cont_20f +
+                    (voyageEditForm.cont_40e + voyageEditForm.cont_40f) * 2}{' '}
+                  / {vessels.find((v) => v.id === voyageEditForm.vessel_id)?.capacity_teu || 0} TEUs
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-xs">
+                {(['cont_20e', 'cont_20f', 'cont_40e', 'cont_40f'] as const).map((k) => (
+                  <div key={k}>
+                    <label className="text-[11px] text-slate-500 uppercase">
+                      {k.replace('cont_', '')}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white text-center font-bold"
+                      value={voyageEditForm[k]}
+                      onChange={(e) =>
+                        setVoyageEditForm({ ...voyageEditForm, [k]: Number(e.target.value) })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="text-sm">
+              <label className="text-xs font-medium text-slate-600">Ghi chú chuyến</label>
+              <input
+                className="w-full border rounded-lg px-3 py-2 mt-1"
+                value={voyageEditForm.captain_notes}
+                onChange={(e) =>
+                  setVoyageEditForm({ ...voyageEditForm, captain_notes: e.target.value })
+                }
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <button
+                type="button"
+                onClick={() => setEditingVoyage(null)}
+                className="px-4 py-2 rounded-lg border text-sm"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-lg bg-maritime-600 text-white text-sm font-medium hover:bg-maritime-500"
+              >
+                Lưu chỉnh sửa chuyến
               </button>
             </div>
           </form>

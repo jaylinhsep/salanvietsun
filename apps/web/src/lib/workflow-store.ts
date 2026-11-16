@@ -246,11 +246,17 @@ export async function loadWorkflowSnapshot(): Promise<WorkflowSnapshot> {
     bookings = seedLocalBookingsIfEmpty();
   }
 
-  const localExtras = readJson<(Voyage & { estimated_freight?: number })[]>(
-    LOCAL_EXTRA_VOYAGES_KEY,
-    [],
-  );
-  const localPatches = readJson<Record<string, Partial<Voyage>>>(LOCAL_VOYAGE_PATCHES_KEY, {});
+  const localExtras = backendHasWorkflowApi
+    ? []
+    : readJson<(Voyage & { estimated_freight?: number })[]>(LOCAL_EXTRA_VOYAGES_KEY, []);
+  const localPatches = backendHasWorkflowApi
+    ? {}
+    : readJson<Record<string, Partial<Voyage>>>(LOCAL_VOYAGE_PATCHES_KEY, {});
+
+  if (backendHasWorkflowApi && typeof window !== 'undefined') {
+    localStorage.removeItem(LOCAL_EXTRA_VOYAGES_KEY);
+    localStorage.removeItem(LOCAL_VOYAGE_PATCHES_KEY);
+  }
 
   // Merge bookings freight estimate into voyages when working locally
   const mergedVoyages = [...localExtras, ...vyRes.data].map((vy) => {
@@ -402,84 +408,64 @@ export async function assignBookingsToBargeAction(params: {
   vessel: Vessel;
   targetVoyage?: Voyage | null;
 }): Promise<{ voyage_id: string }> {
+  const sumTeus = params.bookings.reduce((s, b) => s + Number(b.total_teus || 0), 0);
+  const existingTeus = params.targetVoyage ? Number(params.targetVoyage.total_teus || 0) : 0;
+  const maxTeu = Number(params.vessel.capacity_teu || 0);
+  const projectedTeus = existingTeus + sumTeus;
+  if (projectedTeus > maxTeu) {
+    throw new Error(
+      `Vượt sức chở của sà lan ${params.vessel.name} (${projectedTeus} TEU > tối đa ${maxTeu} TEU). Không thể ghép!`,
+    );
+  }
+
   const bookingIds = params.bookings.map((b) => b.id);
-  try {
-    const res = await fetch(`${API_URL}/dispatch/bookings/assign`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        booking_ids: bookingIds,
-        vessel_id: params.vessel.id,
-        voyage_id: params.targetVoyage?.id,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.voyage_id) return { voyage_id: data.voyage_id };
-    }
-  } catch {
-    // Fallback below
-  }
-
-  // Local stateful assignment (localhost preview before VPS deploy)
-  const sum20e = params.bookings.reduce((s, b) => s + Number(b.cont_20e || 0), 0);
-  const sum20f = params.bookings.reduce((s, b) => s + Number(b.cont_20f || 0), 0);
-  const sum40e = params.bookings.reduce((s, b) => s + Number(b.cont_40e || 0), 0);
-  const sum40f = params.bookings.reduce((s, b) => s + Number(b.cont_40f || 0), 0);
-  const sumTeus = sum20e + sum20f + (sum40e + sum40f) * 2;
-  const first = params.bookings[0];
-
-  let voyageId = params.targetVoyage?.id;
-  if (voyageId && params.targetVoyage) {
-    const patches = readJson<Record<string, Partial<Voyage>>>(LOCAL_VOYAGE_PATCHES_KEY, {});
-    const prev = patches[voyageId] || {};
-    patches[voyageId] = {
-      ...prev,
-      cont_20e: Number(prev.cont_20e ?? params.targetVoyage.cont_20e ?? 0) + sum20e,
-      cont_20f: Number(prev.cont_20f ?? params.targetVoyage.cont_20f ?? 0) + sum20f,
-      cont_40e: Number(prev.cont_40e ?? params.targetVoyage.cont_40e ?? 0) + sum40e,
-      cont_40f: Number(prev.cont_40f ?? params.targetVoyage.cont_40f ?? 0) + sum40f,
-      total_teus: Number(prev.total_teus ?? params.targetVoyage.total_teus ?? 0) + sumTeus,
-    };
-    writeJson(LOCAL_VOYAGE_PATCHES_KEY, patches);
-  } else {
-    voyageId = `voy-local-${Date.now()}`;
-    const newVoyage: Voyage & { estimated_freight?: number } = {
-      id: voyageId,
-      voyage_no: `V.${params.vessel.code.replace(/[^0-9]/g, '') || '36'}-${Date.now().toString().slice(-4)}`,
-      status: 'PLANNED',
-      etd: new Date().toISOString(),
-      eta: new Date(Date.now() + 18 * 3600 * 1000).toISOString(),
-      planned_distance_nm: 64,
-      received_date: new Date().toISOString().slice(0, 10),
-      cont_20e: sum20e,
-      cont_20f: sum20f,
-      cont_40e: sum40e,
-      cont_40f: sum40f,
-      total_teus: sumTeus,
-      customer_id: first.customer_id,
-      customer_name: first.resolved_customer_name || first.customer_name,
+  const res = await fetch(`${API_URL}/dispatch/bookings/assign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      booking_ids: bookingIds,
       vessel_id: params.vessel.id,
-      vessel_code: params.vessel.code,
-      vessel_name: params.vessel.name,
-      captain_name: params.vessel.captain_name,
-      origin_port_id: first.origin_port_id,
-      origin_name: first.resolved_origin_name || first.origin_name || 'SPITC',
-      destination_port_id: first.destination_port_id,
-      dest_name: first.resolved_dest_name || first.dest_name || 'TRÀ NÓC',
-      workflow_step: 0,
-      fuel_start_liters: params.vessel.current_fuel_liters || 5000,
-      fuel_unit_price: 21500,
-    };
-    const extras = readJson<Voyage[]>(LOCAL_EXTRA_VOYAGES_KEY, []);
-    writeJson(LOCAL_EXTRA_VOYAGES_KEY, [newVoyage, ...extras]);
+      voyage_id: params.targetVoyage?.id,
+    }),
+  });
+  if (res.ok) {
+    const data = await res.json();
+    if (data?.voyage_id) return { voyage_id: data.voyage_id };
   }
+  const errData = await res.json().catch(() => null);
+  throw new Error(errData?.message || `Không thể ghép booking vào tàu (${res.status})`);
+}
 
-  const allBookings = seedLocalBookingsIfEmpty().map((b) =>
-    bookingIds.includes(b.id) ? { ...b, voyage_id: voyageId, status: 'ASSIGNED' as const } : b,
-  );
-  writeJson(LOCAL_BOOKINGS_KEY, allBookings);
-  return { voyage_id: voyageId };
+export async function unassignBookingAction(bookingId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/dispatch/bookings/${bookingId}/unassign`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || `Không thể nhả booking (${res.status})`);
+  }
+}
+
+export async function releaseVoyageAction(voyageId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/dispatch/voyages/${voyageId}/release`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || `Không thể nhả chuyến về chế độ chờ (${res.status})`);
+  }
+}
+
+export async function updateVoyageAction(voyageId: string, dto: Partial<Voyage>): Promise<void> {
+  const res = await fetch(`${API_URL}/dispatch/voyages/${voyageId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || `Không thể cập nhật chuyến (${res.status})`);
+  }
 }
 
 export function getOfflineCaptainQueue(): OfflineCaptainQueueItem[] {

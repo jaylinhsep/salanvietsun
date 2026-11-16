@@ -412,7 +412,10 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const ids = Array.isArray(body.booking_ids) ? body.booking_ids : [];
       const selected = db.bookings.filter((b) => ids.includes(b.id));
-      if (selected.length === 0) return send(res, 400, { ok: false, message: 'No bookings' });
+      if (selected.length === 0) return send(res, 400, { ok: false, message: 'Chưa chọn booking nào.' });
+
+      const vessel = db.vessels.find((v) => v.id === body.vessel_id);
+      if (!vessel) return send(res, 404, { ok: false, message: 'Không tìm thấy sà lan.' });
 
       const sum20e = selected.reduce((s, b) => s + Number(b.cont_20e || 0), 0);
       const sum20f = selected.reduce((s, b) => s + Number(b.cont_20f || 0), 0);
@@ -422,18 +425,34 @@ const server = http.createServer(async (req, res) => {
       const first = selected[0];
 
       let targetVoyageId = body.voyage_id || null;
+      let existingTeus = 0;
+      const existingVy = targetVoyageId ? db.voyages.find((v) => v.id === targetVoyageId) : null;
       if (targetVoyageId) {
-        const vy = db.voyages.find((v) => v.id === targetVoyageId);
-        if (vy) {
-          vy.cont_20e = Number(vy.cont_20e || 0) + sum20e;
-          vy.cont_20f = Number(vy.cont_20f || 0) + sum20f;
-          vy.cont_40e = Number(vy.cont_40e || 0) + sum40e;
-          vy.cont_40f = Number(vy.cont_40f || 0) + sum40f;
-          vy.total_teus = Number(vy.total_teus || 0) + sumTeus;
+        if (!existingVy) return send(res, 404, { message: 'Không tìm thấy chuyến cần ghép.' });
+        if (existingVy.status !== 'PLANNED') {
+          return send(res, 400, {
+            message: 'Chỉ được ghép thêm booking vào chuyến đang gom/xếp hàng (PLANNED).',
+          });
         }
+        existingTeus = Number(existingVy.total_teus || 0);
+      }
+
+      const maxTeu = Number(vessel.capacity_teu || 0);
+      const projectedTeus = existingTeus + sumTeus;
+      if (projectedTeus > maxTeu) {
+        return send(res, 400, {
+          message: `Vượt sức chở của sà lan ${vessel.name} (${projectedTeus} TEU > tối đa ${maxTeu} TEU). Không thể ghép!`,
+        });
+      }
+
+      if (existingVy) {
+        existingVy.cont_20e = Number(existingVy.cont_20e || 0) + sum20e;
+        existingVy.cont_20f = Number(existingVy.cont_20f || 0) + sum20f;
+        existingVy.cont_40e = Number(existingVy.cont_40e || 0) + sum40e;
+        existingVy.cont_40f = Number(existingVy.cont_40f || 0) + sum40f;
+        existingVy.total_teus = projectedTeus;
       } else {
         targetVoyageId = uuid();
-        const vessel = db.vessels.find((v) => v.id === body.vessel_id);
         db.voyages.unshift({
           id: targetVoyageId,
           voyage_no:
@@ -472,6 +491,64 @@ const server = http.createServer(async (req, res) => {
       }
       saveDb(db);
       return send(res, 200, { ok: true, voyage_id: targetVoyageId, assignedCount: selected.length });
+    }
+
+    const bkUnassignMatch = p.match(/^\/api\/dispatch\/bookings\/([^/]+)\/unassign$/);
+    if (bkUnassignMatch && m === 'POST') {
+      const bk = db.bookings.find((b) => b.id === bkUnassignMatch[1]);
+      if (!bk) return send(res, 404, { message: 'Booking not found' });
+      if (bk.voyage_id) {
+        const vy = db.voyages.find((v) => v.id === bk.voyage_id);
+        if (vy && vy.status !== 'PLANNED') {
+          return send(res, 400, {
+            message: 'Chỉ được gỡ booking khi chuyến đang ở trạng thái Đang gom/xếp hàng.',
+          });
+        }
+        if (vy) {
+          vy.cont_20e = Math.max(0, Number(vy.cont_20e || 0) - Number(bk.cont_20e || 0));
+          vy.cont_20f = Math.max(0, Number(vy.cont_20f || 0) - Number(bk.cont_20f || 0));
+          vy.cont_40e = Math.max(0, Number(vy.cont_40e || 0) - Number(bk.cont_40e || 0));
+          vy.cont_40f = Math.max(0, Number(vy.cont_40f || 0) - Number(bk.cont_40f || 0));
+          vy.total_teus = Math.max(0, Number(vy.total_teus || 0) - Number(bk.total_teus || 0));
+        }
+        bk.voyage_id = null;
+        bk.status = 'PENDING';
+        bk.updated_at = nowIso();
+        saveDb(db);
+      }
+      return send(res, 200, { ok: true });
+    }
+
+    const vyReleaseMatch = p.match(/^\/api\/dispatch\/voyages\/([^/]+)\/release$/);
+    if (vyReleaseMatch && m === 'POST') {
+      const vy = db.voyages.find((v) => v.id === vyReleaseMatch[1]);
+      if (!vy) return send(res, 404, { message: 'Voyage not found' });
+      if (vy.status !== 'PLANNED') {
+        return send(res, 400, {
+          message: 'Chỉ có thể nhả chuyến khi đang ở trạng thái Đang gom/xếp hàng (PLANNED).',
+        });
+      }
+      let releasedCount = 0;
+      for (const b of db.bookings) {
+        if (b.voyage_id === vy.id) {
+          b.voyage_id = null;
+          b.status = 'PENDING';
+          b.updated_at = nowIso();
+          releasedCount++;
+        }
+      }
+      const hasContainers = db.voyageContainers.some((c) => c.voyage_id === vy.id);
+      if (!hasContainers) {
+        db.voyages = db.voyages.filter((v) => v.id !== vy.id);
+      } else {
+        vy.cont_20e = 0;
+        vy.cont_20f = 0;
+        vy.cont_40e = 0;
+        vy.cont_40f = 0;
+        vy.total_teus = 0;
+      }
+      saveDb(db);
+      return send(res, 200, { ok: true, releasedCount, deletedVoyage: !hasContainers });
     }
     const bkMatch = p.match(/^\/api\/dispatch\/bookings\/([^/]+)$/);
     if (bkMatch && m === 'PATCH') {

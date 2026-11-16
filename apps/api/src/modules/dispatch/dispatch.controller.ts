@@ -124,6 +124,18 @@ export class DispatchController {
     return this.dispatchService.assignBookingsToBarge(body);
   }
 
+  @Post('bookings/:id/unassign')
+  @ApiOperation({ summary: 'Nhả 1 Booking khỏi chuyến đang gom về trạng thái chờ xếp tàu' })
+  unassignBooking(@Param('id') id: string) {
+    return this.dispatchService.unassignBooking(id);
+  }
+
+  @Post('voyages/:id/release')
+  @ApiOperation({ summary: 'Nhả toàn bộ chuyến đang gom (PLANNED) và trả booking về hàng chờ' })
+  releasePlannedVoyage(@Param('id') id: string) {
+    return this.dispatchService.releasePlannedVoyage(id);
+  }
+
   @Patch('voyages/:id/settlement')
   @ApiOperation({ summary: 'Cập nhật chi phí nhiên liệu / cảng / lương chuyến để chốt lãi lỗ' })
   updateSettlement(@Param('id') id: string, @Body() body: any) {

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 
 @Injectable()
@@ -796,7 +796,7 @@ export class DispatchService implements OnModuleInit {
     voyage_no?: string;
   }) {
     const bookingIds = Array.isArray(dto.booking_ids) ? dto.booking_ids : [];
-    if (bookingIds.length === 0) return { ok: false, message: 'Chưa chọn booking nào' };
+    if (bookingIds.length === 0) throw new BadRequestException('Chưa chọn booking nào.');
 
     return this.db.transaction(async (client) => {
       const bkRes = await client.query(
@@ -804,7 +804,14 @@ export class DispatchService implements OnModuleInit {
         [bookingIds],
       );
       const selected = bkRes.rows;
-      if (selected.length === 0) return { ok: false, message: 'Không tìm thấy booking' };
+      if (selected.length === 0) throw new BadRequestException('Không tìm thấy booking.');
+
+      const vesselRes = await client.query(
+        `SELECT id, name, code, COALESCE(capacity_teu, 0)::int AS capacity_teu FROM vessels WHERE id = $1`,
+        [dto.vessel_id],
+      );
+      const vessel = vesselRes.rows[0];
+      if (!vessel) throw new BadRequestException('Không tìm thấy sà lan.');
 
       const sum20e = selected.reduce((s, b) => s + Number(b.cont_20e || 0), 0);
       const sum20f = selected.reduce((s, b) => s + Number(b.cont_20f || 0), 0);
@@ -818,6 +825,28 @@ export class DispatchService implements OnModuleInit {
         .sort()[0];
 
       let targetVoyageId = dto.voyage_id || null;
+      let existingTeus = 0;
+      if (targetVoyageId) {
+        const existingVyRes = await client.query(
+          `SELECT id, status, COALESCE(total_teus, 0)::int AS total_teus FROM voyages WHERE id = $1`,
+          [targetVoyageId],
+        );
+        const existingVy = existingVyRes.rows[0];
+        if (!existingVy) throw new BadRequestException('Không tìm thấy chuyến cần ghép.');
+        if (existingVy.status !== 'PLANNED') {
+          throw new BadRequestException('Chỉ được ghép thêm booking vào chuyến đang gom/xếp hàng (PLANNED).');
+        }
+        existingTeus = Number(existingVy.total_teus || 0);
+      }
+
+      const maxTeu = Number(vessel.capacity_teu || 0);
+      const projectedTeus = existingTeus + sumTeus;
+      if (projectedTeus > maxTeu) {
+        throw new BadRequestException(
+          `Vượt sức chở của sà lan ${vessel.name} (${projectedTeus} TEU > tối đa ${maxTeu} TEU). Không thể ghép!`,
+        );
+      }
+
       if (targetVoyageId) {
         await client.query(
           `
@@ -868,6 +897,80 @@ export class DispatchService implements OnModuleInit {
       );
 
       return { ok: true, voyage_id: targetVoyageId, assignedCount: selected.length };
+    });
+  }
+
+  async unassignBooking(bookingId: string) {
+    return this.db.transaction(async (client) => {
+      const bkRes = await client.query(`SELECT * FROM bookings WHERE id = $1`, [bookingId]);
+      const bk = bkRes.rows[0];
+      if (!bk) throw new BadRequestException('Không tìm thấy booking.');
+      if (!bk.voyage_id) return { ok: true };
+
+      const vyRes = await client.query(`SELECT id, status FROM voyages WHERE id = $1`, [bk.voyage_id]);
+      const vy = vyRes.rows[0];
+      if (vy && vy.status !== 'PLANNED') {
+        throw new BadRequestException('Chỉ được gỡ booking khi chuyến còn ở trạng thái Đang gom/xếp hàng.');
+      }
+
+      const b20e = Number(bk.cont_20e || 0);
+      const b20f = Number(bk.cont_20f || 0);
+      const b40e = Number(bk.cont_40e || 0);
+      const b40f = Number(bk.cont_40f || 0);
+      const bTeus = Number(bk.total_teus || this.computeTeus(b20e, b20f, b40e, b40f));
+
+      await client.query(
+        `
+        UPDATE voyages
+        SET
+          cont_20e = GREATEST(0, COALESCE(cont_20e, 0) - $2),
+          cont_20f = GREATEST(0, COALESCE(cont_20f, 0) - $3),
+          cont_40e = GREATEST(0, COALESCE(cont_40e, 0) - $4),
+          cont_40f = GREATEST(0, COALESCE(cont_40f, 0) - $5),
+          total_teus = GREATEST(0, COALESCE(total_teus, 0) - $6)
+        WHERE id = $1
+        `,
+        [bk.voyage_id, b20e, b20f, b40e, b40f, bTeus],
+      );
+
+      await client.query(
+        `UPDATE bookings SET voyage_id = NULL, status = 'PENDING', updated_at = NOW() WHERE id = $1`,
+        [bookingId],
+      );
+      return { ok: true };
+    });
+  }
+
+  async releasePlannedVoyage(voyageId: string) {
+    return this.db.transaction(async (client) => {
+      const vyRes = await client.query(`SELECT id, status FROM voyages WHERE id = $1`, [voyageId]);
+      const vy = vyRes.rows[0];
+      if (!vy) throw new BadRequestException('Không tìm thấy chuyến.');
+      if (vy.status !== 'PLANNED') {
+        throw new BadRequestException('Chỉ có thể nhả chuyến khi chuyến đang ở trạng thái Đang gom/xếp hàng (PLANNED).');
+      }
+
+      const releasedRes = await client.query(
+        `UPDATE bookings SET voyage_id = NULL, status = 'PENDING', updated_at = NOW() WHERE voyage_id = $1 RETURNING id`,
+        [voyageId],
+      );
+
+      const contCountRes = await client.query(
+        `SELECT COUNT(*)::int AS cnt FROM voyage_containers WHERE voyage_id = $1`,
+        [voyageId],
+      );
+      const hasContainers = Number(contCountRes.rows[0]?.cnt || 0) > 0;
+
+      if (!hasContainers) {
+        await client.query(`DELETE FROM voyages WHERE id = $1`, [voyageId]);
+        return { ok: true, releasedCount: releasedRes.rowCount || 0, deletedVoyage: true };
+      }
+
+      await client.query(
+        `UPDATE voyages SET cont_20e = 0, cont_20f = 0, cont_40e = 0, cont_40f = 0, total_teus = 0 WHERE id = $1`,
+        [voyageId],
+      );
+      return { ok: true, releasedCount: releasedRes.rowCount || 0, deletedVoyage: false };
     });
   }
 
