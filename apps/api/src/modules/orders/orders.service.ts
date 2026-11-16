@@ -84,8 +84,15 @@ export class OrdersService {
   }
 
   async deleteCustomer(id: string) {
-    await this.db.query(`DELETE FROM customers WHERE id = $1`, [id]);
-    return { ok: true };
+    return this.db.transaction(async (client) => {
+      // Detach FK references on existing orders, invoices, voyages & bookings before deleting customer
+      await client.query(`UPDATE voyages SET customer_id = NULL WHERE customer_id = $1`, [id]);
+      await client.query(`UPDATE orders SET customer_id = NULL WHERE customer_id = $1`, [id]);
+      await client.query(`UPDATE invoices SET customer_id = NULL WHERE customer_id = $1`, [id]);
+      await client.query(`UPDATE bookings SET customer_id = NULL WHERE customer_id = $1`, [id]);
+      await client.query(`DELETE FROM customers WHERE id = $1`, [id]);
+      return { ok: true };
+    });
   }
 
   async listOrders() {

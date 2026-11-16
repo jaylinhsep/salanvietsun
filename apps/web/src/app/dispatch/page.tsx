@@ -217,8 +217,16 @@ export default function DispatchPage() {
 
   const handleDeletePort = async (id: string) => {
     if (!confirm('Xóa cảng này?')) return;
-    await fetch(`${API_URL}/dispatch/ports/${id}`, { method: 'DELETE' }).catch(() => null);
-    loadAll();
+    try {
+      const res = await fetch(`${API_URL}/dispatch/ports/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        alert(`Không thể xóa cảng (${res.status}): ${await res.text()}`);
+        return;
+      }
+      loadAll();
+    } catch (err: any) {
+      alert(`Lỗi kết nối API: ${err?.message || err}`);
+    }
   };
 
   // --- CUSTOMER HANDLERS ---
@@ -262,8 +270,16 @@ export default function DispatchPage() {
 
   const handleDeleteCustomer = async (id: string) => {
     if (!confirm('Xóa khách hàng này?')) return;
-    await fetch(`${API_URL}/orders/customers/${id}`, { method: 'DELETE' }).catch(() => null);
-    loadAll();
+    try {
+      const res = await fetch(`${API_URL}/orders/customers/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        alert(`Không thể xóa khách hàng (${res.status}): ${await res.text()}`);
+        return;
+      }
+      loadAll();
+    } catch (err: any) {
+      alert(`Lỗi kết nối API: ${err?.message || err}`);
+    }
   };
 
   const sumTeus = voyages.reduce((acc, vy) => acc + Number(vy.total_teus || 0), 0);

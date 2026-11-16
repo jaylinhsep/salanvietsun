@@ -188,8 +188,16 @@ export class DispatchService implements OnModuleInit {
   }
 
   async deletePort(id: string) {
-    await this.db.query(`DELETE FROM ports WHERE id = $1`, [id]);
-    return { ok: true };
+    return this.db.transaction(async (client) => {
+      await client.query(`UPDATE voyages SET origin_port_id = NULL WHERE origin_port_id = $1`, [id]);
+      await client.query(`UPDATE voyages SET destination_port_id = NULL WHERE destination_port_id = $1`, [id]);
+      await client.query(`UPDATE orders SET origin_port_id = NULL WHERE origin_port_id = $1`, [id]);
+      await client.query(`UPDATE orders SET destination_port_id = NULL WHERE destination_port_id = $1`, [id]);
+      await client.query(`UPDATE bookings SET origin_port_id = NULL WHERE origin_port_id = $1`, [id]);
+      await client.query(`UPDATE bookings SET destination_port_id = NULL WHERE destination_port_id = $1`, [id]);
+      await client.query(`DELETE FROM ports WHERE id = $1`, [id]);
+      return { ok: true };
+    });
   }
 
   // --- VOYAGES CRUD ---
