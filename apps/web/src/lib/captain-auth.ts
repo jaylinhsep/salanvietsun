@@ -1,4 +1,4 @@
-import { API_URL, FuelLog, MaintenanceOrder, Vessel, Voyage } from './api';
+import { API_URL, FuelLog, MaintenanceOrder, Vessel, Voyage, VoyageTallyPhoto } from './api';
 
 export interface CaptainAccountUser {
   id: string;
@@ -20,6 +20,7 @@ export interface CaptainWorkspace {
   voyages: Voyage[];
   fuelLogs: FuelLog[];
   maintenanceOrders: MaintenanceOrder[];
+  tallyPhotos?: VoyageTallyPhoto[];
 }
 
 const CAPTAIN_SESSION_KEY = 'vietsun_captain_session_v1';

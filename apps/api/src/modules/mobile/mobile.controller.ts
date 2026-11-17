@@ -60,4 +60,13 @@ export class MobileController {
   ) {
     return this.mobileService.createScopedMaintenanceOrder(authorization, body);
   }
+
+  @Post('tally-photos')
+  @ApiOperation({ summary: 'Thuyền trưởng gửi ảnh biên bản Tally (đã nén) lên Cloudflare R2' })
+  uploadTallyPhoto(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: any,
+  ) {
+    return this.mobileService.uploadCaptainTallyPhoto(authorization, body);
+  }
 }

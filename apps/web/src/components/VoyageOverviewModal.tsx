@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   AlertTriangle,
   ArrowRight,
+  Camera,
   Check,
   Clock,
   ListChecks,
@@ -208,6 +209,12 @@ export function VoyageOverviewModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              href={`/dispatch?voyageId=${voyage.id}&tab=photos`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-400"
+            >
+              <Camera className="w-4 h-4" /> Ảnh Tally ({voyage.tally_photo_count || 0})
+            </Link>
             <Link
               href={`/dispatch?voyageId=${voyage.id}`}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-maritime-500 text-white text-xs font-semibold hover:bg-maritime-400"

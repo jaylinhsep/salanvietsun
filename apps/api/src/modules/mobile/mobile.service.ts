@@ -260,12 +260,18 @@ export class MobileService implements OnModuleInit {
         vy.loading_completed_at, vy.laytime_start_at, vy.completed_unloading_at,
         vy.pod_photo_url, vy.fuel_start_photo_url, vy.fuel_end_photo_url,
         COALESCE(vy.captain_report_log, '[]'::jsonb) AS captain_report_log,
-        bk.booking_nos, bk.earliest_closing_time
+        bk.booking_nos, bk.earliest_closing_time,
+        COALESCE(tp.tally_photo_count, 0)::int AS tally_photo_count
       FROM voyages vy
       LEFT JOIN customers c ON c.id = vy.customer_id
       LEFT JOIN vessels v ON v.id = vy.vessel_id
       LEFT JOIN ports op ON op.id = vy.origin_port_id
       LEFT JOIN ports dp ON dp.id = vy.destination_port_id
+      LEFT JOIN (
+        SELECT voyage_id, COUNT(*)::int AS tally_photo_count
+        FROM voyage_tally_photos
+        GROUP BY voyage_id
+      ) tp ON tp.voyage_id = vy.id
       LEFT JOIN (
         SELECT
           voyage_id,
@@ -296,12 +302,26 @@ export class MobileService implements OnModuleInit {
       [vessel.id],
     );
 
+    const tallyRes = await this.db.query(
+      `
+      SELECT id, voyage_id, vessel_id, image_url, storage_provider, mime_type,
+        original_size_bytes, compressed_size_bytes, uploaded_by, notes,
+        ai_status, ai_extracted_containers, created_at
+      FROM voyage_tally_photos
+      WHERE vessel_id = $1
+      ORDER BY created_at DESC
+      LIMIT 50
+      `,
+      [vessel.id],
+    );
+
     return {
       captain: account,
       vessel,
       voyages: voyagesRes.rows,
       fuelLogs,
       maintenanceOrders: maintRes.rows,
+      tallyPhotos: tallyRes.rows,
     };
   }
 
@@ -342,6 +362,22 @@ export class MobileService implements OnModuleInit {
     }
     await this.assertVoyageOwnership(vessel.id, dto?.voyage_id);
     return this.submitCaptainStep({ ...dto, vessel_id: vessel.id });
+  }
+
+  async uploadCaptainTallyPhoto(authHeader: string | undefined, dto: any) {
+    const { account, vessel } = await this.authenticateHeader(authHeader);
+    if (!dto?.voyage_id) {
+      throw new ForbiddenException('Thiếu mã chuyến để đính kèm ảnh Tally.');
+    }
+    if (dto?.vessel_id && dto.vessel_id !== vessel.id) {
+      throw new ForbiddenException('Không được phép gửi ảnh Tally cho sà lan khác.');
+    }
+    await this.assertVoyageOwnership(vessel.id, dto.voyage_id);
+    return this.dispatchService.uploadTallyPhoto(dto.voyage_id, {
+      ...dto,
+      vessel_id: vessel.id,
+      uploaded_by: dto?.uploaded_by || account.full_name,
+    });
   }
 
   async createScopedFuelLog(authHeader: string | undefined, dto: any) {

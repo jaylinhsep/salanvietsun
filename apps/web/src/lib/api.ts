@@ -6,6 +6,22 @@ export const API_URL =
       : 'https://api.salan.vietsun.site/api'
     : 'http://127.0.0.1:4005/api');
 
+export function resolveApiMediaUrl(rawUrl?: string | null): string {
+  const s = String(rawUrl || '').trim();
+  if (!s) return '';
+  if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) {
+    return s;
+  }
+  const base = API_URL.replace(/\/api\/?$/, '');
+  if (s.startsWith('/api/')) {
+    return base ? `${base}${s}` : s;
+  }
+  if (s.startsWith('/')) {
+    return `${API_URL}${s}`;
+  }
+  return s;
+}
+
 export interface Vessel {
   id: string;
   code: string;
@@ -123,7 +139,36 @@ export interface Voyage {
   earliest_closing_time?: string;
   estimated_freight?: number;
   total_weight_tons?: number;
+  tally_photo_count?: number;
   created_at?: string;
+}
+
+export interface TallyExtractedContainer {
+  container_no: string;
+  seal_no?: string;
+  cont_type: ContType;
+  notes?: string;
+  confidence?: string;
+}
+
+export interface VoyageTallyPhoto {
+  id: string;
+  voyage_id: string;
+  vessel_id?: string | null;
+  image_url: string;
+  r2_key?: string | null;
+  storage_provider: 'r2' | 'local' | string;
+  mime_type?: string;
+  original_size_bytes?: number;
+  compressed_size_bytes?: number;
+  uploaded_by?: string | null;
+  notes?: string | null;
+  ai_status?: 'PENDING' | 'EXTRACTED' | 'EDITED' | string;
+  ai_provider?: string | null;
+  ai_raw_text?: string | null;
+  ai_extracted_containers: TallyExtractedContainer[];
+  created_at: string;
+  updated_at?: string;
 }
 
 export interface CaptainReportEntry {

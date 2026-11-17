@@ -4,6 +4,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import {
+  decodeBase64DataUrl,
+  deleteTallyImageBinary,
+  getAiConfig,
+  getR2Config,
+  readTallyImageBinary,
+  runAiContainerExtraction,
+  uploadTallyImage,
+} from './r2-ai-helper.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_FILE = path.resolve(__dirname, '../apps/api/.local-db.json');
@@ -365,6 +374,7 @@ function hydrateVoyage(db, vy) {
       .map((b) => b.closing_time)
       .filter(Boolean)
       .sort()[0] || vy.earliest_closing_time;
+  const tallyCount = (db.voyageTallyPhotos || []).filter((tp) => tp.voyage_id === vy.id).length;
 
   return {
     ...vy,
@@ -389,6 +399,7 @@ function hydrateVoyage(db, vy) {
     earliest_closing_time: earliestClosing,
     estimated_freight: estFreight || vy.estimated_freight || 0,
     total_weight_tons: totalWeightTons || Number(vy.total_weight_tons || 0),
+    tally_photo_count: tallyCount,
   };
 }
 
@@ -657,7 +668,7 @@ function send(res, status, data) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Ai-Api-Key',
   });
   res.end(JSON.stringify(data));
 }
@@ -1141,6 +1152,121 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- VOYAGES & CONTAINERS ---
+    if (m === 'GET' && p === '/api/dispatch/storage-ai-status') {
+      const r2 = getR2Config();
+      const ai = getAiConfig();
+      return send(res, 200, {
+        r2Configured: r2.configured,
+        r2Bucket: r2.configured ? r2.bucket : null,
+        aiConfigured: ai.configured,
+        aiProvider: ai.provider,
+      });
+    }
+    const tallyListMatch = p.match(/^\/api\/dispatch\/voyages\/([^/]+)\/tally-photos$/);
+    if (tallyListMatch && m === 'GET') {
+      const list = (db.voyageTallyPhotos || [])
+        .filter((tp) => tp.voyage_id === tallyListMatch[1])
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return send(res, 200, list);
+    }
+    if (tallyListMatch && m === 'POST') {
+      const body = await readBody(req);
+      const vy = (db.voyages || []).find((x) => x.id === tallyListMatch[1]);
+      if (!vy) return send(res, 404, { message: 'Không tìm thấy chuyến.' });
+      if (!body?.image_data_url) return send(res, 400, { message: 'Thiếu dữ liệu ảnh Tally.' });
+      const decoded = decodeBase64DataUrl(body.image_data_url);
+      const photoId = uuid();
+      const uploaded = await uploadTallyImage({
+        photoId,
+        voyageCodeOrId: vy.voyage_no || vy.id,
+        buffer: decoded.buffer,
+        mimeType: decoded.mimeType,
+        ext: decoded.ext,
+      });
+      const rec = {
+        id: photoId,
+        voyage_id: vy.id,
+        vessel_id: body.vessel_id || vy.vessel_id || null,
+        image_url: uploaded.image_url,
+        r2_key: uploaded.r2_key,
+        storage_provider: uploaded.storage_provider,
+        mime_type: decoded.mimeType,
+        original_size_bytes: Number(body.original_size_bytes || decoded.buffer.length),
+        compressed_size_bytes: decoded.buffer.length,
+        uploaded_by: body.uploaded_by || 'Điều độ viên',
+        notes: body.notes || null,
+        ai_status: 'PENDING',
+        ai_provider: null,
+        ai_raw_text: null,
+        ai_extracted_containers: [],
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      };
+      db.voyageTallyPhotos = [rec, ...(db.voyageTallyPhotos || [])];
+      saveDb(db);
+      return send(res, 201, rec);
+    }
+    const tallyImgMatch = p.match(/^\/api\/dispatch\/tally-photos\/([^/]+)\/image$/);
+    if (tallyImgMatch && m === 'GET') {
+      const rec = (db.voyageTallyPhotos || []).find((tp) => tp.id === tallyImgMatch[1]);
+      if (!rec) return send(res, 404, { message: 'Not found' });
+      const bin = await readTallyImageBinary(rec);
+      if (!bin) return send(res, 404, { message: 'Image binary missing' });
+      res.writeHead(200, {
+        'Content-Type': bin.mimeType,
+        'Cache-Control': 'public, max-age=86400',
+        'Access-Control-Allow-Origin': '*',
+      });
+      return res.end(bin.buffer);
+    }
+    const tallyExtractMatch = p.match(/^\/api\/dispatch\/tally-photos\/([^/]+)\/extract-ai$/);
+    if (tallyExtractMatch && m === 'POST') {
+      const body = await readBody(req);
+      const rec = (db.voyageTallyPhotos || []).find((tp) => tp.id === tallyExtractMatch[1]);
+      if (!rec) return send(res, 404, { message: 'Không tìm thấy ảnh Tally.' });
+      const bin = await readTallyImageBinary(rec);
+      if (!bin) return send(res, 400, { message: 'Không đọc được ảnh để xử lý AI.' });
+      const aiRes = await runAiContainerExtraction({
+        imageBuffer: bin.buffer,
+        mimeType: bin.mimeType,
+        overrideApiKey: body?.api_key || req.headers['x-ai-api-key'],
+      });
+      if (!aiRes.ai_configured) {
+        return send(res, 200, { ai_configured: false, message: aiRes.message, photo: rec });
+      }
+      rec.ai_status = 'EXTRACTED';
+      rec.ai_provider = aiRes.provider;
+      rec.ai_raw_text = aiRes.raw_text;
+      rec.ai_extracted_containers = aiRes.containers;
+      rec.updated_at = nowIso();
+      saveDb(db);
+      return send(res, 200, {
+        ai_configured: true,
+        provider: aiRes.provider,
+        containers: aiRes.containers,
+        photo: rec,
+      });
+    }
+    const tallyEditedMatch = p.match(/^\/api\/dispatch\/tally-photos\/([^/]+)\/extracted$/);
+    if (tallyEditedMatch && m === 'PATCH') {
+      const body = await readBody(req);
+      const rec = (db.voyageTallyPhotos || []).find((tp) => tp.id === tallyEditedMatch[1]);
+      if (!rec) return send(res, 404, { message: 'Không tìm thấy ảnh Tally.' });
+      if (rec.ai_status === 'PENDING') rec.ai_status = 'EDITED';
+      rec.ai_extracted_containers = Array.isArray(body?.containers) ? body.containers : [];
+      rec.updated_at = nowIso();
+      saveDb(db);
+      return send(res, 200, rec);
+    }
+    const tallyDelMatch = p.match(/^\/api\/dispatch\/tally-photos\/([^/]+)$/);
+    if (tallyDelMatch && m === 'DELETE') {
+      const rec = (db.voyageTallyPhotos || []).find((tp) => tp.id === tallyDelMatch[1]);
+      db.voyageTallyPhotos = (db.voyageTallyPhotos || []).filter((tp) => tp.id !== tallyDelMatch[1]);
+      saveDb(db);
+      if (rec) await deleteTallyImageBinary(rec);
+      return send(res, 200, { ok: true });
+    }
+
     if (m === 'GET' && p === '/api/dispatch/voyages') {
       return send(
         res,
@@ -1751,12 +1877,17 @@ const server = http.createServer(async (req, res) => {
       const maintenanceOrders = (db.maintenance || []).filter(
         (mt) => mt.vessel_id === auth.vessel.id,
       );
+      const tallyPhotos = (db.voyageTallyPhotos || [])
+        .filter((tp) => tp.vessel_id === auth.vessel.id)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .slice(0, 50);
       return send(res, 200, {
         captain: auth.captain,
         vessel: auth.vessel,
         voyages,
         fuelLogs,
         maintenanceOrders,
+        tallyPhotos,
       });
     }
 
@@ -1832,6 +1963,52 @@ const server = http.createServer(async (req, res) => {
       db.maintenance.unshift(ticket);
       saveDb(db);
       return send(res, 201, ticket);
+    }
+
+    if (m === 'POST' && p === '/api/mobile/tally-photos') {
+      const auth = requireCaptainAuth(req, res, db);
+      if (!auth) return;
+      const body = await readBody(req);
+      if (!body?.voyage_id) return send(res, 400, { message: 'Thiếu mã chuyến.' });
+      if (body.vessel_id && body.vessel_id !== auth.vessel.id) {
+        return send(res, 403, { message: 'Không được phép gửi ảnh Tally cho sà lan khác.' });
+      }
+      const vy = (db.voyages || []).find((x) => x.id === body.voyage_id);
+      if (!vy || vy.vessel_id !== auth.vessel.id) {
+        return send(res, 403, { message: 'Chuyến không thuộc sà lan của bạn.' });
+      }
+      if (!body?.image_data_url) return send(res, 400, { message: 'Thiếu dữ liệu ảnh Tally.' });
+      const decoded = decodeBase64DataUrl(body.image_data_url);
+      const photoId = uuid();
+      const uploaded = await uploadTallyImage({
+        photoId,
+        voyageCodeOrId: vy.voyage_no || vy.id,
+        buffer: decoded.buffer,
+        mimeType: decoded.mimeType,
+        ext: decoded.ext,
+      });
+      const rec = {
+        id: photoId,
+        voyage_id: vy.id,
+        vessel_id: auth.vessel.id,
+        image_url: uploaded.image_url,
+        r2_key: uploaded.r2_key,
+        storage_provider: uploaded.storage_provider,
+        mime_type: decoded.mimeType,
+        original_size_bytes: Number(body.original_size_bytes || decoded.buffer.length),
+        compressed_size_bytes: decoded.buffer.length,
+        uploaded_by: body.uploaded_by || auth.captain.full_name,
+        notes: body.notes || null,
+        ai_status: 'PENDING',
+        ai_provider: null,
+        ai_raw_text: null,
+        ai_extracted_containers: [],
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      };
+      db.voyageTallyPhotos = [rec, ...(db.voyageTallyPhotos || [])];
+      saveDb(db);
+      return send(res, 201, rec);
     }
 
     if (m === 'POST' && p === '/api/mobile/checkin') {

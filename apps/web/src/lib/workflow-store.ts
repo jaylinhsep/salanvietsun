@@ -20,6 +20,7 @@ const LOCAL_BOOKINGS_KEY = 'vietsun_tms_local_bookings_v2';
 const LOCAL_VOYAGE_PATCHES_KEY = 'vietsun_tms_local_voyage_patches_v2';
 const LOCAL_EXTRA_VOYAGES_KEY = 'vietsun_tms_local_extra_voyages_v2';
 const MOBILE_OFFLINE_QUEUE_KEY = 'vietsun_mobile_offline_queue_v1';
+const MOBILE_OFFLINE_TALLY_QUEUE_KEY = 'vietsun_mobile_offline_tally_queue_v1';
 
 export interface OfflineCaptainQueueItem {
   queueId: string;
@@ -48,9 +49,9 @@ export const CAPTAIN_STEPS: {
 }[] = [
   {
     step: 1,
-    title: '1. Nhận lệnh & Chốt dầu đầu',
-    shortTitle: 'Nhận lệnh & Dầu đầu',
-    desc: 'Xác nhận lệnh chuyến, nhập tồn dầu đầu (L) & chụp ảnh thước dầu',
+    title: '1. Nhận lệnh và gửi Tally',
+    shortTitle: 'Nhận lệnh & Gửi Tally',
+    desc: 'Xác nhận lệnh chuyến, chụp hoặc up ảnh biên bản Tally (nén & gửi lên Cloudflare R2)',
   },
   {
     step: 2,
@@ -578,12 +579,62 @@ export async function submitCaptainStepAction(
   }
 }
 
+export interface OfflineTallyQueueItem {
+  queueId: string;
+  voyage_id: string;
+  vessel_id: string;
+  image_data_url: string;
+  original_size_bytes: number;
+  notes?: string;
+  timestamp: string;
+}
+
+export function getOfflineTallyQueue(): OfflineTallyQueueItem[] {
+  return readJson<OfflineTallyQueueItem[]>(MOBILE_OFFLINE_TALLY_QUEUE_KEY, []);
+}
+
+export async function uploadCaptainTallyPhotoAction(
+  item: Omit<OfflineTallyQueueItem, 'queueId'>,
+  forceOffline = false,
+): Promise<{ synced: boolean; queuedCount: number; photo?: any }> {
+  const enqueue = () => {
+    const queue = getOfflineTallyQueue();
+    queue.push({ ...item, queueId: `tally-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` });
+    writeJson(MOBILE_OFFLINE_TALLY_QUEUE_KEY, queue);
+    return { synced: false, queuedCount: queue.length + getOfflineCaptainQueue().length };
+  };
+
+  if (forceOffline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    return enqueue();
+  }
+
+  try {
+    const res = await fetch(`${API_URL}/mobile/tally-photos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...captainAuthHeaders() },
+      body: JSON.stringify(item),
+    });
+    if (res.ok) {
+      const photo = await res.json();
+      return {
+        synced: true,
+        queuedCount: getOfflineCaptainQueue().length + getOfflineTallyQueue().length,
+        photo,
+      };
+    }
+    return enqueue();
+  } catch {
+    return enqueue();
+  }
+}
+
 export async function syncOfflineCaptainQueue(): Promise<{
   flushed: number;
   remaining: number;
 }> {
   const queue = getOfflineCaptainQueue();
-  if (queue.length === 0) return { flushed: 0, remaining: 0 };
+  const tallyQueue = getOfflineTallyQueue();
+  if (queue.length === 0 && tallyQueue.length === 0) return { flushed: 0, remaining: 0 };
 
   const remaining: OfflineCaptainQueueItem[] = [];
   let flushed = 0;
@@ -604,7 +655,67 @@ export async function syncOfflineCaptainQueue(): Promise<{
     }
   }
   writeJson(MOBILE_OFFLINE_QUEUE_KEY, remaining);
-  return { flushed, remaining: remaining.length };
+
+  const remainingTally: OfflineTallyQueueItem[] = [];
+  for (const tItem of tallyQueue) {
+    try {
+      const res = await fetch(`${API_URL}/mobile/tally-photos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...captainAuthHeaders() },
+        body: JSON.stringify(tItem),
+      });
+      if (res.ok) {
+        flushed++;
+      } else {
+        remainingTally.push(tItem);
+      }
+    } catch {
+      remainingTally.push(tItem);
+    }
+  }
+  writeJson(MOBILE_OFFLINE_TALLY_QUEUE_KEY, remainingTally);
+
+  return { flushed, remaining: remaining.length + remainingTally.length };
+}
+
+export async function compressTallyImage(
+  file: File,
+  maxDim = 1600,
+  quality = 0.78,
+): Promise<{
+  dataUrl: string;
+  mimeType: string;
+  originalSize: number;
+  compressedSize: number;
+}> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(String(reader.result));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(String(reader.result));
+      img.src = String(reader.result);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  const base64Part = dataUrl.split(',')[1] || '';
+  const compressedSize = Math.round((base64Part.length * 3) / 4);
+  return {
+    dataUrl,
+    mimeType: 'image/jpeg',
+    originalSize: file.size || compressedSize,
+    compressedSize,
+  };
 }
 
 export async function updateSettlementAction(

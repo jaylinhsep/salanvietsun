@@ -6,20 +6,24 @@ import {
   CheckCircle2,
   Clock,
   CloudOff,
-  Fuel,
+  ImagePlus,
   MapPin,
   RefreshCw,
   Ship,
+  UploadCloud,
   Wifi,
   WifiOff,
 } from 'lucide-react';
-import type { Vessel, Voyage } from '@/lib/api';
+import { resolveApiMediaUrl, type Vessel, type Voyage, type VoyageTallyPhoto } from '@/lib/api';
 import {
   CAPTAIN_STEPS,
   compressImageToDataUrl,
+  compressTallyImage,
   getOfflineCaptainQueue,
+  getOfflineTallyQueue,
   submitCaptainStepAction,
   syncOfflineCaptainQueue,
+  uploadCaptainTallyPhotoAction,
 } from '@/lib/workflow-store';
 import { CAPTAIN_SESSION_EVENT, fetchCaptainWorkspace } from '@/lib/captain-auth';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -34,9 +38,11 @@ export default function MobileCaptainHomePage() {
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [busyStep, setBusyStep] = useState<number | null>(null);
 
-  // Step 1 inputs (Dầu đầu)
-  const [fuelStart, setFuelStart] = useState<string>('');
-  const [fuelStartPhoto, setFuelStartPhoto] = useState<string>('');
+  // Step 1 inputs (Gửi ảnh Tally -> nén & đẩy R2)
+  const [tallyPhotos, setTallyPhotos] = useState<VoyageTallyPhoto[]>([]);
+  const [uploadingTally, setUploadingTally] = useState<boolean>(false);
+  const [tallyNote, setTallyNote] = useState<string>('');
+  const [lastCompressionInfo, setLastCompressionInfo] = useState<string>('');
 
   // Step 5 inputs (Dầu cuối + Cấp thêm + POD)
   const [fuelAdded, setFuelAdded] = useState<string>('0');
@@ -51,7 +57,8 @@ export default function MobileCaptainHomePage() {
       const ws = await fetchCaptainWorkspace();
       setVessels(ws.vessel ? [ws.vessel] : []);
       setVoyages(ws.voyages || []);
-      setQueueCount(getOfflineCaptainQueue().length);
+      setTallyPhotos(ws.tallyPhotos || []);
+      setQueueCount(getOfflineCaptainQueue().length + getOfflineTallyQueue().length);
     } catch (err: any) {
       if (err?.message !== 'UNAUTHENTICATED') {
         setStatusMessage(err?.message || 'Không tải được dữ liệu tàu.');
@@ -104,13 +111,70 @@ export default function MobileCaptainHomePage() {
     );
   }, [voyages, vessel]);
 
-  useEffect(() => {
-    if (vessel && !fuelStart) {
-      setFuelStart(String(activeVoyage?.fuel_start_liters || vessel.current_fuel_liters || 5000));
-    }
-  }, [vessel, activeVoyage, fuelStart]);
-
   const currentStep = Number(activeVoyage?.workflow_step || 0);
+
+  const activeVoyageTallyPhotos = useMemo(() => {
+    if (!activeVoyage) return [];
+    return tallyPhotos.filter((tp) => tp.voyage_id === activeVoyage.id);
+  }, [tallyPhotos, activeVoyage]);
+
+  const queuedTallyPhotos = useMemo(() => {
+    if (!activeVoyage) return [];
+    return getOfflineTallyQueue().filter((q) => q.voyage_id === activeVoyage.id);
+  }, [activeVoyage, queueCount]);
+
+  const formatKb = (bytes?: number) => {
+    const b = Number(bytes || 0);
+    if (b >= 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+    return `${Math.max(1, Math.round(b / 1024))} KB`;
+  };
+
+  const handleTallyFilesUpload = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    if (!vessel || !activeVoyage) {
+      setStatusMessage('Sà lan hiện chưa có lệnh điều độ chuyến để gửi Tally.');
+      return;
+    }
+    setUploadingTally(true);
+    setStatusMessage('');
+    let syncedCount = 0;
+    let queuedNow = 0;
+    let totalOrig = 0;
+    let totalComp = 0;
+    try {
+      for (const file of Array.from(fileList)) {
+        const compressed = await compressTallyImage(file);
+        totalOrig += compressed.originalSize;
+        totalComp += compressed.compressedSize;
+        const res = await uploadCaptainTallyPhotoAction(
+          {
+            voyage_id: activeVoyage.id,
+            vessel_id: vessel.id,
+            image_data_url: compressed.dataUrl,
+            original_size_bytes: compressed.originalSize,
+            notes: tallyNote || undefined,
+            timestamp: new Date().toISOString(),
+          },
+          simulateOffline,
+        );
+        if (res.synced) syncedCount++;
+        else queuedNow++;
+        setQueueCount(res.queuedCount);
+      }
+      setLastCompressionInfo(`Đã nén: ${formatKb(totalOrig)} → ${formatKb(totalComp)}`);
+      setStatusMessage(
+        syncedCount > 0
+          ? `Đã nén & đẩy ${syncedCount} ảnh Tally lên hệ thống (Tab Hình ảnh chuyến ${activeVoyage.voyage_no}).`
+          : `[Lưu Offline] Đã nén & lưu tạm ${queuedNow} ảnh Tally, sẽ tự đẩy lên R2 khi có mạng.`,
+      );
+      setTallyNote('');
+      await refreshAll();
+    } catch (err: any) {
+      setStatusMessage(err?.message || 'Không thể nén/tải ảnh Tally.');
+    } finally {
+      setUploadingTally(false);
+    }
+  };
 
   const laytimeText = useMemo(() => {
     const start = activeVoyage?.laytime_start_at || activeVoyage?.ata;
@@ -162,12 +226,10 @@ export default function MobileCaptainHomePage() {
           step,
           lat: coords.lat,
           lng: coords.lng,
-          fuel_start_liters: step === 1 ? Number(fuelStart || 0) : undefined,
           fuel_added_liters: step === 5 ? Number(fuelAdded || 0) : undefined,
           fuel_end_liters: step === 5 ? Number(fuelEnd || 0) : undefined,
-          fuel_start_photo_url: step === 1 && fuelStartPhoto ? fuelStartPhoto : undefined,
           pod_photo_url: step === 5 && podPhoto ? podPhoto : undefined,
-          notes: stepNote || undefined,
+          notes: (step === 1 ? tallyNote : stepNote) || undefined,
           timestamp: new Date().toISOString(),
         },
         simulateOffline,
@@ -350,31 +412,103 @@ export default function MobileCaptainHomePage() {
                   {done && <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />}
                 </div>
 
-                {/* Extra inputs for Step 1 */}
-                {st.step === 1 && !done && (
-                  <div className="grid grid-cols-1 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
-                    <div>
-                      <label className="font-semibold text-slate-700 flex items-center gap-1">
-                        <Fuel className="w-3.5 h-3.5 text-emerald-600" /> Số lít dầu tồn đầu chuyến (L)
+                {/* Extra inputs for Step 1: Nhận lệnh & Gửi Tally (nén + Cloudflare R2) */}
+                {st.step === 1 && (
+                  <div className="space-y-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="flex items-center justify-center gap-1.5 py-2.5 px-2.5 rounded-lg border border-dashed border-maritime-500 bg-white text-maritime-700 cursor-pointer font-semibold hover:bg-sky-50">
+                        <Camera className="w-4 h-4 flex-shrink-0" />
+                        <span>{uploadingTally ? 'Đang nén...' : 'Chụp ảnh Tally'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          disabled={uploadingTally}
+                          className="hidden"
+                          onChange={(e) => {
+                            handleTallyFilesUpload(e.target.files);
+                            e.target.value = '';
+                          }}
+                        />
                       </label>
-                      <input
-                        type="number"
-                        className="w-full border rounded-lg px-3 py-2 mt-1 bg-white text-sm font-bold"
-                        value={fuelStart}
-                        onChange={(e) => setFuelStart(e.target.value)}
-                      />
+                      <label className="flex items-center justify-center gap-1.5 py-2.5 px-2.5 rounded-lg border border-dashed border-indigo-400 bg-white text-indigo-700 cursor-pointer font-semibold hover:bg-indigo-50">
+                        <ImagePlus className="w-4 h-4 flex-shrink-0" />
+                        <span>{uploadingTally ? 'Đang đẩy...' : 'Up hình Tally'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          disabled={uploadingTally}
+                          className="hidden"
+                          onChange={(e) => {
+                            handleTallyFilesUpload(e.target.files);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
                     </div>
-                    <label className="inline-flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-dashed border-slate-400 bg-white text-slate-700 cursor-pointer font-medium">
-                      <Camera className="w-4 h-4 text-maritime-600" />
-                      {fuelStartPhoto ? 'Đã đính kèm ảnh thước dầu ✓' : 'Chụp / Chọn ảnh thước dầu đầu'}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={(e) => handlePhotoUpload(e.target.files?.[0], setFuelStartPhoto)}
-                      />
-                    </label>
+
+                    {lastCompressionInfo && (
+                      <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                        <UploadCloud className="w-3.5 h-3.5" /> {lastCompressionInfo}
+                      </div>
+                    )}
+
+                    <input
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white text-xs"
+                      placeholder="Ghi chú biên bản Tally / Nhận lệnh (nếu có)..."
+                      value={tallyNote}
+                      onChange={(e) => setTallyNote(e.target.value)}
+                    />
+
+                    {(activeVoyageTallyPhotos.length > 0 || queuedTallyPhotos.length > 0) && (
+                      <div className="space-y-1.5 pt-1">
+                        <div className="text-[11px] font-semibold text-slate-600">
+                          Ảnh Tally đã gửi trong chuyến ({activeVoyageTallyPhotos.length + queuedTallyPhotos.length}):
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {activeVoyageTallyPhotos.map((tp) => (
+                            <a
+                              key={tp.id}
+                              href={resolveApiMediaUrl(tp.image_url)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="group relative rounded-lg overflow-hidden border border-slate-200 bg-white aspect-square block"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={resolveApiMediaUrl(tp.image_url)}
+                                alt="Tally"
+                                className="w-full h-full object-cover"
+                              />
+                              <span
+                                className={`absolute bottom-1 right-1 px-1 py-0.5 rounded text-[9px] font-bold text-white ${
+                                  tp.storage_provider === 'r2' ? 'bg-orange-600/90' : 'bg-emerald-600/90'
+                                }`}
+                              >
+                                {tp.storage_provider === 'r2' ? 'R2' : 'OK'}
+                              </span>
+                            </a>
+                          ))}
+                          {queuedTallyPhotos.map((qp) => (
+                            <div
+                              key={qp.queueId}
+                              className="relative rounded-lg overflow-hidden border border-amber-300 bg-amber-50 aspect-square"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={qp.image_data_url}
+                                alt="Tally offline"
+                                className="w-full h-full object-cover opacity-80"
+                              />
+                              <span className="absolute bottom-1 right-1 px-1 py-0.5 rounded text-[9px] font-bold bg-amber-600 text-white">
+                                Chờ 4G
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

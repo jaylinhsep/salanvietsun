@@ -3,9 +3,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  Camera,
   Check,
   ClipboardPaste,
   Download,
+  ListChecks,
   Pencil,
   Plus,
   RefreshCw,
@@ -21,13 +23,16 @@ import {
   type Vessel,
   type Voyage,
   type VoyageContainer,
+  type VoyageTallyPhoto,
 } from '@/lib/api';
+import { VoyageTallyPhotosTab } from '@/components/VoyageTallyPhotosTab';
 
 interface Props {
   voyage: Voyage;
   ports: Port[];
   customers: Customer[];
   vessels: Vessel[];
+  initialTab?: 'CONTAINERS' | 'PHOTOS';
   onBack: () => void;
   onVoyageUpdated: () => void;
 }
@@ -227,11 +232,15 @@ export function VoyageContainersPanel({
   ports,
   customers,
   vessels,
+  initialTab = 'CONTAINERS',
   onBack,
   onVoyageUpdated,
 }: Props) {
+  const [panelTab, setPanelTab] = useState<'CONTAINERS' | 'PHOTOS'>(initialTab);
   const [rows, setRows] = useState<VoyageContainer[]>([]);
   const [voyageBookings, setVoyageBookings] = useState<Booking[]>([]);
+  const [tallyPhotos, setTallyPhotos] = useState<VoyageTallyPhoto[]>([]);
+  const [loadingTallyPhotos, setLoadingTallyPhotos] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -292,9 +301,31 @@ export function VoyageContainersPanel({
     }
   };
 
+  const loadTallyPhotos = async () => {
+    setLoadingTallyPhotos(true);
+    try {
+      const res = await fetch(`${API_URL}/dispatch/voyages/${voyage.id}/tally-photos`, {
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const list = await res.json();
+        setTallyPhotos(Array.isArray(list) ? list : []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingTallyPhotos(false);
+    }
+  };
+
+  useEffect(() => {
+    setPanelTab(initialTab);
+  }, [initialTab, voyage.id]);
+
   useEffect(() => {
     setNewRow(makeDefaultDraft(voyage));
     loadContainers();
+    loadTallyPhotos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voyage.id]);
 
@@ -653,6 +684,48 @@ export function VoyageContainersPanel({
           <div className="text-xl font-bold text-rose-700 mt-0.5">{stats.totalTeus} TEUs</div>
         </div>
       </div>
+
+      {/* Sub-tabs inside Voyage Dispatch: Danh sách Cont vs Hình ảnh Tally & AI */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+        <button
+          type="button"
+          onClick={() => setPanelTab('CONTAINERS')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold border transition-colors ${
+            panelTab === 'CONTAINERS'
+              ? 'bg-navy-900 text-white border-navy-900 shadow-sm'
+              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <ListChecks className="w-4 h-4" /> Danh sách Container ({rows.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setPanelTab('PHOTOS')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold border transition-colors ${
+            panelTab === 'PHOTOS'
+              ? 'bg-navy-900 text-white border-navy-900 shadow-sm'
+              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <Camera className="w-4 h-4" /> Hình ảnh Tally &amp; AI ({tallyPhotos.length})
+        </button>
+      </div>
+
+      {panelTab === 'PHOTOS' ? (
+        <VoyageTallyPhotosTab
+          voyage={voyage}
+          voyageBookings={voyageBookings}
+          existingContainerNos={rows.map((r) => r.container_no)}
+          photos={tallyPhotos}
+          loading={loadingTallyPhotos}
+          onRefreshPhotos={loadTallyPhotos}
+          onContainersAssigned={async () => {
+            await loadContainers();
+            onVoyageUpdated();
+          }}
+        />
+      ) : (
+        <>
 
       {/* Autocomplete datalists */}
       <datalist id="dl-ports">
@@ -1093,6 +1166,8 @@ export function VoyageContainersPanel({
           </table>
         </div>
       </div>
+        </>
+      )}
 
       {/* Bulk Paste from Excel Modal */}
       {showPasteModal && (

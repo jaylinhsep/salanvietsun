@@ -222,6 +222,26 @@ async function ensureSchema(client) {
       data JSONB NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS voyage_tally_photos (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      voyage_id UUID NOT NULL REFERENCES voyages(id) ON DELETE CASCADE,
+      vessel_id UUID REFERENCES vessels(id) ON DELETE SET NULL,
+      image_url TEXT NOT NULL,
+      r2_key TEXT,
+      storage_provider VARCHAR(20) NOT NULL DEFAULT 'local',
+      mime_type VARCHAR(60) DEFAULT 'image/jpeg',
+      original_size_bytes INT DEFAULT 0,
+      compressed_size_bytes INT DEFAULT 0,
+      uploaded_by VARCHAR(120),
+      notes TEXT,
+      ai_status VARCHAR(30) DEFAULT 'PENDING',
+      ai_provider VARCHAR(40),
+      ai_raw_text TEXT,
+      ai_extracted_containers JSONB DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_voyage_tally_photos_voyage_id ON voyage_tally_photos(voyage_id);
   `);
 }
 

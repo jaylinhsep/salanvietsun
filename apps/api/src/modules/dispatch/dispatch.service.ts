@@ -1,6 +1,22 @@
-import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
+import * as crypto from 'node:crypto';
 import { DatabaseService } from '../../database/database.service';
 import { DEFAULT_SAILING_SCHEDULE } from './sailing-schedule.seed';
+import {
+  decodeBase64DataUrl,
+  deleteTallyImageBinary,
+  getAiConfig,
+  getR2Config,
+  readTallyImageBinary,
+  runAiContainerExtraction,
+  uploadTallyImage,
+} from './r2-storage.util';
 
 @Injectable()
 export class DispatchService implements OnModuleInit {
@@ -108,6 +124,27 @@ export class DispatchService implements OnModuleInit {
           data JSONB NOT NULL,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+
+        CREATE TABLE IF NOT EXISTS voyage_tally_photos (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          voyage_id UUID NOT NULL REFERENCES voyages(id) ON DELETE CASCADE,
+          vessel_id UUID REFERENCES vessels(id) ON DELETE SET NULL,
+          image_url TEXT NOT NULL,
+          r2_key TEXT,
+          storage_provider VARCHAR(20) NOT NULL DEFAULT 'local',
+          mime_type VARCHAR(60) DEFAULT 'image/jpeg',
+          original_size_bytes INT DEFAULT 0,
+          compressed_size_bytes INT DEFAULT 0,
+          uploaded_by VARCHAR(120),
+          notes TEXT,
+          ai_status VARCHAR(30) DEFAULT 'PENDING',
+          ai_provider VARCHAR(40),
+          ai_raw_text TEXT,
+          ai_extracted_containers JSONB DEFAULT '[]'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_voyage_tally_photos_voyage_id ON voyage_tally_photos(voyage_id);
       `);
     } catch (err: any) {
       this.logger.warn(`Auto-migration voyages skipped: ${err.message}`);
@@ -258,13 +295,19 @@ export class DispatchService implements OnModuleInit {
         vy.pod_photo_url, vy.fuel_start_photo_url, vy.fuel_end_photo_url,
         COALESCE(vy.captain_report_log, '[]'::jsonb) AS captain_report_log,
         bk.booking_nos, bk.earliest_closing_time,
-        COALESCE(bk.total_weight_tons, 0)::float AS total_weight_tons
+        COALESCE(bk.total_weight_tons, 0)::float AS total_weight_tons,
+        COALESCE(tp.tally_photo_count, 0)::int AS tally_photo_count
       FROM voyages vy
       LEFT JOIN customers c ON c.id = vy.customer_id
       LEFT JOIN vessels v ON v.id = vy.vessel_id
       LEFT JOIN orders o ON o.id = vy.order_id
       LEFT JOIN ports op ON op.id = vy.origin_port_id
       LEFT JOIN ports dp ON dp.id = vy.destination_port_id
+      LEFT JOIN (
+        SELECT voyage_id, COUNT(*)::int AS tally_photo_count
+        FROM voyage_tally_photos
+        GROUP BY voyage_id
+      ) tp ON tp.voyage_id = vy.id
       LEFT JOIN (
         SELECT
           voyage_id,
@@ -1578,5 +1621,208 @@ export class DispatchService implements OnModuleInit {
       ...res.rows[0].data,
       updated_at: res.rows[0].updated_at,
     };
+  }
+
+  // --- TALLY PHOTOS (CLOUDFLARE R2 + AI VISION EXTRACTION) ---
+  getStorageAndAiStatus() {
+    const r2 = getR2Config();
+    const ai = getAiConfig();
+    return {
+      r2Configured: r2.configured,
+      r2Bucket: r2.configured ? r2.bucket : null,
+      aiConfigured: ai.configured,
+      aiProvider: ai.provider,
+    };
+  }
+
+  async listTallyPhotos(voyageId: string) {
+    const res = await this.db.query(
+      `
+      SELECT
+        id, voyage_id, vessel_id, image_url, r2_key, storage_provider, mime_type,
+        original_size_bytes, compressed_size_bytes, uploaded_by, notes,
+        ai_status, ai_provider, ai_raw_text,
+        COALESCE(ai_extracted_containers, '[]'::jsonb) AS ai_extracted_containers,
+        created_at, updated_at
+      FROM voyage_tally_photos
+      WHERE voyage_id = $1
+      ORDER BY created_at DESC
+      `,
+      [voyageId],
+    );
+    return res.rows;
+  }
+
+  async uploadTallyPhoto(
+    voyageId: string,
+    dto: {
+      image_data_url: string;
+      vessel_id?: string;
+      original_size_bytes?: number;
+      uploaded_by?: string;
+      notes?: string;
+    },
+  ) {
+    if (!dto?.image_data_url) {
+      throw new BadRequestException('Thiếu dữ liệu hình ảnh Tally.');
+    }
+    const vyRes = await this.db.query(
+      `SELECT id, voyage_no, vessel_id FROM voyages WHERE id = $1 LIMIT 1`,
+      [voyageId],
+    );
+    const vy = vyRes.rows[0];
+    if (!vy) {
+      throw new NotFoundException('Không tìm thấy chuyến để lưu hình ảnh Tally.');
+    }
+
+    const decoded = decodeBase64DataUrl(dto.image_data_url);
+    if (!decoded.buffer || decoded.buffer.length === 0) {
+      throw new BadRequestException('Dữ liệu ảnh không hợp lệ.');
+    }
+
+    const photoId = crypto.randomUUID();
+    const uploaded = await uploadTallyImage({
+      photoId,
+      voyageCodeOrId: vy.voyage_no || vy.id,
+      buffer: decoded.buffer,
+      mimeType: decoded.mimeType,
+      ext: decoded.ext,
+    });
+
+    const res = await this.db.query(
+      `
+      INSERT INTO voyage_tally_photos (
+        id, voyage_id, vessel_id, image_url, r2_key, storage_provider,
+        mime_type, original_size_bytes, compressed_size_bytes, uploaded_by, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *
+      `,
+      [
+        photoId,
+        voyageId,
+        dto.vessel_id || vy.vessel_id || null,
+        uploaded.image_url,
+        uploaded.r2_key,
+        uploaded.storage_provider,
+        decoded.mimeType,
+        Number(dto.original_size_bytes || decoded.buffer.length),
+        decoded.buffer.length,
+        dto.uploaded_by || 'Thuyền trưởng',
+        dto.notes || null,
+      ],
+    );
+    return res.rows[0];
+  }
+
+  async getTallyPhotoBinary(photoId: string) {
+    const res = await this.db.query(
+      `SELECT id, storage_provider, r2_key, mime_type FROM voyage_tally_photos WHERE id = $1 LIMIT 1`,
+      [photoId],
+    );
+    const row = res.rows[0];
+    if (!row) {
+      throw new NotFoundException('Không tìm thấy ảnh Tally.');
+    }
+    const bin = await readTallyImageBinary({
+      photoId: row.id,
+      storage_provider: row.storage_provider,
+      r2_key: row.r2_key,
+      mime_type: row.mime_type,
+    });
+    if (!bin) {
+      throw new NotFoundException('Không đọc được dữ liệu file ảnh Tally.');
+    }
+    return bin;
+  }
+
+  async extractTallyPhotoWithAi(photoId: string, overrideApiKey?: string) {
+    const res = await this.db.query(
+      `SELECT * FROM voyage_tally_photos WHERE id = $1 LIMIT 1`,
+      [photoId],
+    );
+    const row = res.rows[0];
+    if (!row) {
+      throw new NotFoundException('Không tìm thấy ảnh Tally.');
+    }
+
+    const bin = await readTallyImageBinary({
+      photoId: row.id,
+      storage_provider: row.storage_provider,
+      r2_key: row.r2_key,
+      mime_type: row.mime_type,
+    });
+    if (!bin) {
+      throw new BadRequestException('Không tải được ảnh Tally để phân tích AI.');
+    }
+
+    const aiRes = await runAiContainerExtraction({
+      imageBuffer: bin.buffer,
+      mimeType: bin.mimeType,
+      overrideApiKey,
+    });
+
+    if (!aiRes.ai_configured) {
+      return {
+        ai_configured: false,
+        message: aiRes.message,
+        photo: row,
+      };
+    }
+
+    const upd = await this.db.query(
+      `
+      UPDATE voyage_tally_photos
+      SET
+        ai_status = 'EXTRACTED',
+        ai_provider = $2,
+        ai_raw_text = $3,
+        ai_extracted_containers = $4::jsonb,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+      `,
+      [photoId, aiRes.provider, aiRes.raw_text, JSON.stringify(aiRes.containers)],
+    );
+
+    return {
+      ai_configured: true,
+      provider: aiRes.provider,
+      containers: aiRes.containers,
+      photo: upd.rows[0],
+    };
+  }
+
+  async updateTallyPhotoExtracted(photoId: string, containers: any[]) {
+    const upd = await this.db.query(
+      `
+      UPDATE voyage_tally_photos
+      SET
+        ai_status = CASE WHEN ai_status = 'PENDING' THEN 'EDITED' ELSE ai_status END,
+        ai_extracted_containers = $2::jsonb,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+      `,
+      [photoId, JSON.stringify(Array.isArray(containers) ? containers : [])],
+    );
+    if (!upd.rows[0]) {
+      throw new NotFoundException('Không tìm thấy ảnh Tally.');
+    }
+    return upd.rows[0];
+  }
+
+  async deleteTallyPhoto(photoId: string) {
+    const res = await this.db.query(
+      `DELETE FROM voyage_tally_photos WHERE id = $1 RETURNING id, storage_provider, r2_key`,
+      [photoId],
+    );
+    const row = res.rows[0];
+    if (!row) return { ok: true };
+    await deleteTallyImageBinary({
+      photoId: row.id,
+      storage_provider: row.storage_provider,
+      r2_key: row.r2_key,
+    });
+    return { ok: true };
   }
 }

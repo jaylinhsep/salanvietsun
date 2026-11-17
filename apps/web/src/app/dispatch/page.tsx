@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Anchor, Building2, Compass, ListChecks, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Anchor, Building2, Camera, Compass, ListChecks, Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   API_URL,
   FALLBACK_CUSTOMERS,
@@ -60,6 +60,7 @@ const EMPTY_CUSTOMER_FORM = {
 export default function DispatchPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('VOYAGES');
   const [selectedVoyageId, setSelectedVoyageId] = useState<string | null>(null);
+  const [selectedVoyageTab, setSelectedVoyageTab] = useState<'CONTAINERS' | 'PHOTOS'>('CONTAINERS');
   const [voyages, setVoyages] = useState<Voyage[]>([]);
   const [vessels, setVessels] = useState<Vessel[]>([]);
   const [ports, setPorts] = useState<Port[]>([]);
@@ -100,17 +101,27 @@ export default function DispatchPage() {
   useEffect(() => {
     loadAll();
     if (typeof window !== 'undefined') {
-      const vid = new URLSearchParams(window.location.search).get('voyageId');
+      const sp = new URLSearchParams(window.location.search);
+      const vid = sp.get('voyageId');
+      const tab = sp.get('tab');
       if (vid) setSelectedVoyageId(vid);
+      if (tab === 'photos') setSelectedVoyageTab('PHOTOS');
     }
   }, []);
 
-  const selectVoyage = (id: string | null) => {
+  const selectVoyage = (id: string | null, tab: 'CONTAINERS' | 'PHOTOS' = 'CONTAINERS') => {
     setSelectedVoyageId(id);
+    setSelectedVoyageTab(tab);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
-      if (id) url.searchParams.set('voyageId', id);
-      else url.searchParams.delete('voyageId');
+      if (id) {
+        url.searchParams.set('voyageId', id);
+        if (tab === 'PHOTOS') url.searchParams.set('tab', 'photos');
+        else url.searchParams.delete('tab');
+      } else {
+        url.searchParams.delete('voyageId');
+        url.searchParams.delete('tab');
+      }
       window.history.replaceState({}, '', url.pathname + url.search);
     }
   };
@@ -455,6 +466,7 @@ export default function DispatchPage() {
           ports={ports}
           customers={customers}
           vessels={vessels}
+          initialTab={selectedVoyageTab}
           onBack={() => selectVoyage(null)}
           onVoyageUpdated={loadAll}
         />
@@ -698,10 +710,24 @@ export default function DispatchPage() {
                           </div>
                           <div className="flex flex-wrap justify-end gap-1">
                             <button
-                              onClick={() => selectVoyage(vy.id)}
+                              onClick={() => selectVoyage(vy.id, 'CONTAINERS')}
                               className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 font-medium text-[11px]"
                             >
                               <ListChecks className="w-3 h-3" /> Cont
+                            </button>
+                            <button
+                              onClick={() => selectVoyage(vy.id, 'PHOTOS')}
+                              className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded border font-medium text-[11px] ${
+                                Number(vy.tally_photo_count || 0) > 0
+                                  ? 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'
+                                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                              }`}
+                              title="Tab Hình ảnh Tally & trích xuất AI"
+                            >
+                              <Camera className="w-3 h-3" />
+                              {Number(vy.tally_photo_count || 0) > 0
+                                ? `Ảnh (${vy.tally_photo_count})`
+                                : 'Ảnh'}
                             </button>
                             <button
                               onClick={() => openEditVoyage(vy)}

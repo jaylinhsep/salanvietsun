@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { DispatchService } from './dispatch.service';
 
 @ApiTags('Dispatching & Voyage Planning')
@@ -164,5 +165,57 @@ export class DispatchController {
   @ApiOperation({ summary: 'Lưu / cập nhật bảng lịch chạy sà lan' })
   saveSailingSchedule(@Body() body: any) {
     return this.dispatchService.saveSailingSchedule(body);
+  }
+
+  @Get('storage-ai-status')
+  @ApiOperation({ summary: 'Kiểm tra trạng thái cấu hình Cloudflare R2 & AI Vision' })
+  getStorageAiStatus() {
+    return this.dispatchService.getStorageAndAiStatus();
+  }
+
+  @Get('voyages/:id/tally-photos')
+  @ApiOperation({ summary: 'Danh sách hình ảnh Tally & danh sách cont trích xuất bằng AI của chuyến' })
+  listTallyPhotos(@Param('id') id: string) {
+    return this.dispatchService.listTallyPhotos(id);
+  }
+
+  @Post('voyages/:id/tally-photos')
+  @ApiOperation({ summary: 'Tải ảnh Tally đã nén lên Cloudflare R2 / máy chủ cho chuyến' })
+  uploadTallyPhoto(@Param('id') id: string, @Body() body: any) {
+    return this.dispatchService.uploadTallyPhoto(id, body);
+  }
+
+  @Get('tally-photos/:photoId/image')
+  @ApiOperation({ summary: 'Xem / tải file nhị phân ảnh Tally' })
+  async getTallyPhotoImage(@Param('photoId') photoId: string, @Res() res: Response) {
+    const bin = await this.dispatchService.getTallyPhotoBinary(photoId);
+    res.setHeader('Content-Type', bin.mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(bin.buffer);
+  }
+
+  @Post('tally-photos/:photoId/extract-ai')
+  @ApiOperation({ summary: 'Xử lý hình ảnh Tally bằng AI Vision để trích xuất list số container' })
+  extractTallyPhotoAi(
+    @Param('photoId') photoId: string,
+    @Headers('x-ai-api-key') headerAiKey: string | undefined,
+    @Body() body: { api_key?: string } | undefined,
+  ) {
+    return this.dispatchService.extractTallyPhotoWithAi(photoId, body?.api_key || headerAiKey);
+  }
+
+  @Patch('tally-photos/:photoId/extracted')
+  @ApiOperation({ summary: 'Cập nhật / hiệu chỉnh danh sách container đã trích xuất từ ảnh Tally' })
+  updateTallyPhotoExtracted(
+    @Param('photoId') photoId: string,
+    @Body() body: { containers: any[] },
+  ) {
+    return this.dispatchService.updateTallyPhotoExtracted(photoId, body?.containers || []);
+  }
+
+  @Delete('tally-photos/:photoId')
+  @ApiOperation({ summary: 'Xóa ảnh Tally' })
+  deleteTallyPhoto(@Param('photoId') photoId: string) {
+    return this.dispatchService.deleteTallyPhoto(photoId);
   }
 }
