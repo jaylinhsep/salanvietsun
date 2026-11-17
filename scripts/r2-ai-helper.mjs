@@ -285,12 +285,24 @@ export async function runAiContainerExtraction({ imageBuffer, mimeType, override
   const base64 = imageBuffer.toString('base64');
 
   if (ai.provider === 'gemini') {
-    const candidateModels = Array.from(
-      new Set([process.env.GEMINI_VISION_MODEL, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite'].map((m) => String(m || '').trim()).filter(Boolean)),
+    const staticModels = Array.from(
+      new Set(
+        [
+          process.env.GEMINI_VISION_MODEL,
+          'gemini-3.5-flash-lite',
+          'gemini-3.5-flash',
+          'gemini-3-flash',
+          'gemini-3.5-pro',
+          'gemini-2.5-flash',
+          'gemini-2.5-flash-lite',
+        ]
+          .map((m) => String(m || '').trim())
+          .filter(Boolean),
+      ),
     );
-    let lastErrMsg = 'Gemini API lỗi không xác định.';
-    for (const model of candidateModels) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
+    const tryGeminiModel = async (model) => {
+      const cleanModel = model.replace(/^models\//i, '');
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -302,12 +314,40 @@ export async function runAiContainerExtraction({ imageBuffer, mimeType, override
       const json = await res.json().catch(() => ({}));
       if (res.ok) {
         const rawText = json?.candidates?.[0]?.content?.parts?.map((p) => p?.text || '').join('\n') || '';
-        return { ai_configured: true, provider: `gemini (${model})`, raw_text: rawText, containers: normalizeExtractedContainers(rawText) };
+        return { ok: true, result: { ai_configured: true, provider: `gemini (${cleanModel})`, raw_text: rawText, containers: normalizeExtractedContainers(rawText) } };
       }
       const errMsg = json?.error?.message || `Gemini API lỗi (${res.status})`;
-      lastErrMsg = `[${model}] ${errMsg}`;
-      const isModelUnavailable = res.status === 404 || /not found|not supported|deprecated|no longer available/i.test(errMsg);
-      if (!isModelUnavailable) throw new Error(lastErrMsg);
+      const isModelUnavailable = res.status === 404 || /not found|not supported|deprecated|no longer available|retired/i.test(errMsg);
+      return { ok: false, message: `[${cleanModel}] ${errMsg}`, isModelUnavailable };
+    };
+    let lastErrMsg = 'Gemini API lỗi không xác định.';
+    const tried = new Set();
+    for (const model of staticModels) {
+      tried.add(model);
+      const attempt = await tryGeminiModel(model);
+      if (attempt.ok) return attempt.result;
+      lastErrMsg = attempt.message;
+      if (!attempt.isModelUnavailable) throw new Error(lastErrMsg);
+    }
+    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(ai.apiKey)}`).catch(() => null);
+    if (listRes && listRes.ok) {
+      const listJson = await listRes.json().catch(() => ({}));
+      const discovered = (listJson?.models || [])
+        .filter((m) => {
+          const name = String(m?.name || '').toLowerCase();
+          const methods = Array.isArray(m?.supportedGenerationMethods) ? m.supportedGenerationMethods : [];
+          return methods.includes('generateContent') && name.includes('gemini') && !/embedding|aqa|tts|imagen|veo|audio|robotics/i.test(name);
+        })
+        .map((m) => String(m.name).replace(/^models\//i, ''))
+        .sort((a, b) => b.localeCompare(a));
+      for (const model of discovered) {
+        if (tried.has(model)) continue;
+        tried.add(model);
+        const attempt = await tryGeminiModel(model);
+        if (attempt.ok) return attempt.result;
+        lastErrMsg = attempt.message;
+        if (!attempt.isModelUnavailable) throw new Error(lastErrMsg);
+      }
     }
     throw new Error(lastErrMsg);
   }
