@@ -4,9 +4,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
-  Cloud,
   ImagePlus,
-  KeyRound,
   Loader2,
   Plus,
   Save,
@@ -37,14 +35,6 @@ interface Props {
 }
 
 const CONT_TYPES: ContType[] = ['20E', '20F', '40E', '40F'];
-const AI_TEMP_KEY_STORAGE = 'vietsun_temp_ai_vision_key';
-
-function formatBytes(bytes?: number): string {
-  const b = Number(bytes || 0);
-  if (!b) return '—';
-  if (b >= 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(b / 1024))} KB`;
-}
 
 export function VoyageTallyPhotosTab({
   voyage,
@@ -55,40 +45,16 @@ export function VoyageTallyPhotosTab({
   onRefreshPhotos,
   onContainersAssigned,
 }: Props) {
-  const [storageStatus, setStorageStatus] = useState<{
-    r2Configured: boolean;
-    r2Bucket?: string | null;
-    aiConfigured: boolean;
-    aiProvider?: string;
-  } | null>(null);
-
-  const [tempAiKey, setTempAiKey] = useState<string>('');
-  const [showKeyBox, setShowKeyBox] = useState<boolean>(false);
-
   const [uploading, setUploading] = useState(false);
   const [extractingId, setExtractingId] = useState<string | null>(null);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [savingListId, setSavingListId] = useState<string | null>(null);
 
-  // Per-photo editable extracted list & checked rows & selected booking
   const [draftLists, setDraftLists] = useState<Record<string, TallyExtractedContainer[]>>({});
   const [checkedMap, setCheckedMap] = useState<Record<string, Record<number, boolean>>>({});
   const [targetBookingByPhoto, setTargetBookingByPhoto] = useState<Record<string, string>>({});
   const [feedbackByPhoto, setFeedbackByPhoto] = useState<Record<string, string>>({});
   const [zoomPhoto, setZoomPhoto] = useState<VoyageTallyPhoto | null>(null);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = window.sessionStorage.getItem(AI_TEMP_KEY_STORAGE) || '';
-      if (saved) setTempAiKey(saved);
-    }
-    fetch(`${API_URL}/dispatch/storage-ai-status`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d) setStorageStatus(d);
-      })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     const nextDrafts: Record<string, TallyExtractedContainer[]> = {};
@@ -100,10 +66,7 @@ export function VoyageTallyPhotosTab({
       const list = Array.isArray(p.ai_extracted_containers) ? p.ai_extracted_containers : [];
       nextDrafts[p.id] = list.map((item) => ({
         container_no: String(item.container_no || '').toUpperCase(),
-        seal_no: String(item.seal_no || '').toUpperCase(),
         cont_type: (CONT_TYPES.includes(item.cont_type) ? item.cont_type : '20F') as ContType,
-        notes: String(item.notes || ''),
-        confidence: item.confidence,
       }));
       const checks: Record<number, boolean> = {};
       list.forEach((_, idx) => {
@@ -121,14 +84,6 @@ export function VoyageTallyPhotosTab({
   const existingSet = new Set(
     existingContainerNos.map((c) => String(c || '').trim().toUpperCase()).filter(Boolean),
   );
-
-  const handleSaveTempKey = (val: string) => {
-    setTempAiKey(val);
-    if (typeof window !== 'undefined') {
-      if (val.trim()) window.sessionStorage.setItem(AI_TEMP_KEY_STORAGE, val.trim());
-      else window.sessionStorage.removeItem(AI_TEMP_KEY_STORAGE);
-    }
-  };
 
   const handleUploadFromDispatcher = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -161,12 +116,10 @@ export function VoyageTallyPhotosTab({
     setExtractingId(photo.id);
     setFeedbackByPhoto((prev) => ({ ...prev, [photo.id]: '' }));
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (tempAiKey.trim()) headers['X-Ai-Api-Key'] = tempAiKey.trim();
       const res = await fetch(`${API_URL}/dispatch/tally-photos/${photo.id}/extract-ai`, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ api_key: tempAiKey.trim() || undefined }),
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -177,12 +130,9 @@ export function VoyageTallyPhotosTab({
         return;
       }
       if (data?.ai_configured === false) {
-        setShowKeyBox(true);
         setFeedbackByPhoto((prev) => ({
           ...prev,
-          [photo.id]:
-            data?.message ||
-            'Chưa có API Key AI (GEMINI_API_KEY / OPENAI_API_KEY). Bạn có thể dán key vào ô "Cấu hình AI Key" phía trên hoặc tự thêm dòng cont.',
+          [photo.id]: data?.message || 'Máy chủ chưa cấu hình API Key AI.',
         }));
         return;
       }
@@ -191,8 +141,8 @@ export function VoyageTallyPhotosTab({
         ...prev,
         [photo.id]:
           count > 0
-            ? `AI (${data.provider}) đã trích xuất ${count} số container từ ảnh!`
-            : `AI (${data.provider}) không tìm thấy số container rõ ràng trong ảnh.`,
+            ? `Đã trích xuất ${count} số container từ ảnh Tally!`
+            : 'Không tìm thấy số container rõ ràng trong ảnh.',
       }));
       await onRefreshPhotos();
     } finally {
@@ -222,10 +172,7 @@ export function VoyageTallyPhotosTab({
       }));
       return {
         ...prev,
-        [photoId]: [
-          ...list,
-          { container_no: '', seal_no: '', cont_type: '20F', notes: '', confidence: 'MANUAL' },
-        ],
+        [photoId]: [...list, { container_no: '', cont_type: '20F' }],
       };
     });
   };
@@ -242,9 +189,8 @@ export function VoyageTallyPhotosTab({
     try {
       const containers = (draftLists[photoId] || [])
         .map((c) => ({
-          ...c,
           container_no: c.container_no.trim().toUpperCase(),
-          seal_no: (c.seal_no || '').trim().toUpperCase(),
+          cont_type: c.cont_type || '20F',
         }))
         .filter((c) => c.container_no.length > 0);
       const res = await fetch(`${API_URL}/dispatch/tally-photos/${photoId}/extracted`, {
@@ -267,9 +213,8 @@ export function VoyageTallyPhotosTab({
     const selected = list
       .filter((c, i) => checks[i] && c.container_no.trim().length > 0)
       .map((c) => ({
-        ...c,
         container_no: c.container_no.trim().toUpperCase(),
-        seal_no: (c.seal_no || '').trim().toUpperCase(),
+        cont_type: c.cont_type || '20F',
       }));
 
     if (selected.length === 0) {
@@ -288,7 +233,7 @@ export function VoyageTallyPhotosTab({
       booking_no: targetBk ? targetBk.booking_no : '',
       trip_no: voyage.voyage_no || '',
       container_no: c.container_no,
-      seal_no: c.seal_no || '',
+      seal_no: '',
       origin_name:
         targetBk?.resolved_origin_name || targetBk?.origin_name || voyage.origin_name || '',
       destination_name:
@@ -301,17 +246,21 @@ export function VoyageTallyPhotosTab({
         '',
       departure_date: departureDate,
       cont_type: c.cont_type || '20F',
-      notes: c.notes || (targetBk ? `Từ ảnh Tally (${targetBk.booking_no})` : 'Từ ảnh Tally'),
+      notes: '',
     }));
 
     setAssigningId(photoId);
     try {
-      // Also persist edited extracted list first so edits aren't lost
       await fetch(`${API_URL}/dispatch/tally-photos/${photoId}/extracted`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          containers: list.filter((c) => c.container_no.trim().length > 0),
+          containers: list
+            .filter((c) => c.container_no.trim().length > 0)
+            .map((c) => ({
+              container_no: c.container_no.trim().toUpperCase(),
+              cont_type: c.cont_type || '20F',
+            })),
         }),
       }).catch(() => {});
 
@@ -346,108 +295,37 @@ export function VoyageTallyPhotosTab({
 
   return (
     <div className="space-y-4">
-      {/* Top Status & Upload Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-bold text-sm text-navy-900">
-              Hình ảnh Tally từ Thuyền trưởng &amp; Trích xuất AI
-            </h3>
-            <span
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-                storageStatus?.r2Configured
-                  ? 'bg-orange-50 text-orange-800 border-orange-200'
-                  : 'bg-slate-100 text-slate-700 border-slate-200'
-              }`}
-            >
-              <Cloud className="w-3 h-3" />
-              {storageStatus?.r2Configured
-                ? `Cloudflare R2 (${storageStatus.r2Bucket})`
-                : 'Lưu máy chủ nội bộ (sẵn sàng R2)'}
-            </span>
-            <span
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-                storageStatus?.aiConfigured || tempAiKey.trim()
-                  ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
-                  : 'bg-amber-50 text-amber-800 border-amber-200'
-              }`}
-            >
-              <Sparkles className="w-3 h-3" />
-              {storageStatus?.aiConfigured
-                ? `AI Vision: ${storageStatus.aiProvider}`
-                : tempAiKey.trim()
-                  ? 'AI Vision: Key tạm thời đang bật'
-                  : 'Chưa cấu hình AI Key'}
-            </span>
-          </div>
-          <p className="text-xs text-slate-500">
-            Ảnh Tally do Thuyền trưởng chụp ở Bước 1 sẽ tự động nén và đẩy về đây để AI đọc list số cont và gán nhanh vào Booking của chuyến.
+      {/* Clean Header & Upload Bar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h3 className="font-bold text-sm text-navy-900">
+            Hình ảnh Tally của chuyến {voyage.voyage_no}
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Xử lý ảnh bằng AI để lấy Số Container &amp; Loại Cont, sau đó chọn Booking để gán vào chuyến.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowKeyBox((v) => !v)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
-            {showKeyBox ? 'Ẩn cấu hình AI' : 'Cấu hình AI Key'}
-          </button>
-
-          <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-maritime-600 text-white text-xs font-semibold hover:bg-maritime-500 cursor-pointer shadow-sm">
-            {uploading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <ImagePlus className="w-4 h-4" />
-            )}
-            <span>{uploading ? 'Đang nén & tải lên...' : '+ Tải ảnh Tally từ máy'}</span>
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              disabled={uploading}
-              className="hidden"
-              onChange={(e) => {
-                handleUploadFromDispatcher(e.target.files);
-                e.target.value = '';
-              }}
-            />
-          </label>
-        </div>
+        <label className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-maritime-600 text-white text-xs font-semibold hover:bg-maritime-500 cursor-pointer shadow-sm self-start sm:self-auto">
+          {uploading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <ImagePlus className="w-4 h-4" />
+          )}
+          <span>{uploading ? 'Đang tải lên...' : '+ Tải ảnh Tally từ máy'}</span>
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            disabled={uploading}
+            className="hidden"
+            onChange={(e) => {
+              handleUploadFromDispatcher(e.target.files);
+              e.target.value = '';
+            }}
+          />
+        </label>
       </div>
-
-      {/* Optional AI Key Config Box */}
-      {showKeyBox && (
-        <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 space-y-2 text-xs">
-          <div className="font-bold text-indigo-900">
-            Cấu hình AI Vision (Gemini hoặc OpenAI) &amp; Cloudflare R2
-          </div>
-          <p className="text-indigo-800">
-            Trên VPS, thêm vào <code>apps/api/.env</code>:{' '}
-            <code>GEMINI_API_KEY=...</code> (hoặc <code>OPENAI_API_KEY=sk-...</code>) và các biến R2 (<code>R2_ACCOUNT_ID</code>, <code>R2_ACCESS_KEY_ID</code>, <code>R2_SECRET_ACCESS_KEY</code>, <code>R2_BUCKET_NAME</code>, <code>R2_PUBLIC_URL</code>).
-            Nếu muốn thử AI ngay trên trình duyệt, bạn có thể nhập tạm API Key Gemini/OpenAI bên dưới:
-          </p>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <input
-              type="password"
-              value={tempAiKey}
-              onChange={(e) => handleSaveTempKey(e.target.value)}
-              placeholder="Nhập GEMINI_API_KEY (AIza...) hoặc OPENAI_API_KEY (sk-...) để test ngay..."
-              className="flex-1 border border-indigo-300 rounded-lg px-3 py-1.5 bg-white text-xs font-mono"
-            />
-            {tempAiKey && (
-              <button
-                type="button"
-                onClick={() => handleSaveTempKey('')}
-                className="px-3 py-1.5 rounded-lg border border-indigo-300 bg-white text-indigo-800 font-medium"
-              >
-                Xóa key tạm
-              </button>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Photo Cards */}
       {loading ? (
@@ -458,10 +336,10 @@ export function VoyageTallyPhotosTab({
         <div className="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center space-y-2">
           <ImagePlus className="w-8 h-8 text-slate-300 mx-auto" />
           <div className="text-sm font-semibold text-slate-600">
-            Chưa có hình ảnh Tally nào được gửi cho chuyến {voyage.voyage_no}
+            Chưa có hình ảnh Tally nào cho chuyến {voyage.voyage_no}
           </div>
           <p className="text-xs text-slate-400">
-            Thuyền trưởng chụp/gửi ảnh Tally ở Bước 1 trên App Tàu (/mobile), hoặc Điều độ viên tải ảnh trực tiếp bằng nút phía trên.
+            Thuyền trưởng gửi ảnh ở Bước 1 trên App Tàu (/mobile), hoặc Điều độ viên bấm tải ảnh ở nút phía trên.
           </p>
         </div>
       ) : (
@@ -487,25 +365,14 @@ export function VoyageTallyPhotosTab({
                       <span className="font-bold text-slate-800">
                         Ảnh Tally #{photos.length - idx}
                       </span>
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            photo.storage_provider === 'r2'
-                              ? 'bg-orange-100 text-orange-800'
-                              : 'bg-slate-200 text-slate-700'
-                          }`}
-                        >
-                          {photo.storage_provider === 'r2' ? 'Cloudflare R2' : 'Local'}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeletePhoto(photo.id)}
-                          className="p-1 text-rose-600 hover:bg-rose-50 rounded"
-                          title="Xóa ảnh"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePhoto(photo.id)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-rose-600 hover:bg-rose-50 rounded border border-rose-200 text-[11px]"
+                        title="Xóa ảnh"
+                      >
+                        <Trash2 className="w-3 h-3" /> Xóa
+                      </button>
                     </div>
 
                     <div
@@ -524,24 +391,20 @@ export function VoyageTallyPhotosTab({
                     </div>
                   </div>
 
-                  <div className="text-[11px] text-slate-500 space-y-0.5">
+                  <div className="text-[11px] text-slate-500 space-y-1">
                     <div>
                       Người gửi: <strong className="text-slate-700">{photo.uploaded_by || 'Thuyền trưởng'}</strong> •{' '}
                       {new Date(photo.created_at).toLocaleString('vi-VN')}
                     </div>
-                    <div>
-                      Dung lượng nén: <strong>{formatBytes(photo.original_size_bytes)}</strong> →{' '}
-                      <strong className="text-emerald-700">{formatBytes(photo.compressed_size_bytes)}</strong>
-                    </div>
                     {photo.notes && (
-                      <div className="text-slate-700 bg-white border border-slate-200 rounded px-2 py-1 mt-1">
+                      <div className="text-slate-700 bg-white border border-slate-200 rounded px-2 py-1">
                         Ghi chú: {photo.notes}
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Right: AI Extraction & Booking Assignment */}
+                {/* Right: AI Extraction (Số Cont & Loại Cont only) & Booking Assignment */}
                 <div className="lg:col-span-7 p-4 flex flex-col justify-between gap-3">
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -559,39 +422,41 @@ export function VoyageTallyPhotosTab({
                           }`}
                         >
                           {photo.ai_status === 'EXTRACTED'
-                            ? `Đã xử lý AI (${list.length} cont)`
+                            ? `Đã xử lý (${list.length} cont)`
                             : photo.ai_status === 'EDITED'
-                              ? `Đã chỉnh tay (${list.length} cont)`
-                              : 'Chờ AI xử lý'}
+                              ? `Đã chỉnh (${list.length} cont)`
+                              : 'Chờ xử lý'}
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          disabled={extractingId === photo.id}
-                          onClick={() => handleExtractAi(photo)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60 shadow-sm"
-                        >
-                          {extractingId === photo.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Sparkles className="w-3.5 h-3.5" />
-                          )}
-                          {extractingId === photo.id ? 'AI đang đọc ảnh...' : 'Xử lý ảnh bằng AI'}
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        disabled={extractingId === photo.id}
+                        onClick={() => handleExtractAi(photo)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60 shadow-sm"
+                      >
+                        {extractingId === photo.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5" />
+                        )}
+                        {extractingId === photo.id ? 'Đang trích xuất...' : 'Xử lý ảnh bằng AI'}
+                      </button>
                     </div>
 
                     {feedback && (
                       <div
                         className={`rounded-lg px-3 py-2 text-xs font-medium flex items-start gap-2 ${
-                          feedback.includes('Chưa có') || feedback.includes('Lỗi')
+                          feedback.includes('Chưa có') ||
+                          feedback.includes('Lỗi') ||
+                          feedback.includes('Không tìm')
                             ? 'bg-amber-50 border border-amber-200 text-amber-900'
                             : 'bg-emerald-50 border border-emerald-200 text-emerald-800'
                         }`}
                       >
-                        {feedback.includes('Chưa có') || feedback.includes('Lỗi') ? (
+                        {feedback.includes('Chưa có') ||
+                        feedback.includes('Lỗi') ||
+                        feedback.includes('Không tìm') ? (
                           <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-600" />
                         ) : (
                           <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-600" />
@@ -600,12 +465,12 @@ export function VoyageTallyPhotosTab({
                       </div>
                     )}
 
-                    {/* Editable Extracted Container Table */}
-                    <div className="border border-slate-200 rounded-lg overflow-x-auto">
+                    {/* Clean Table: Chỉ Số Container & Loại Cont */}
+                    <div className="border border-slate-200 rounded-lg overflow-x-auto max-h-96 overflow-y-auto">
                       <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                        <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 sticky top-0">
                           <tr>
-                            <th className="px-2 py-2 w-8 text-center">
+                            <th className="px-2.5 py-2 w-9 text-center">
                               <input
                                 type="checkbox"
                                 checked={list.length > 0 && list.every((_, i) => checks[i])}
@@ -618,18 +483,17 @@ export function VoyageTallyPhotosTab({
                                 }}
                               />
                             </th>
-                            <th className="px-2 py-2">Số Container</th>
-                            <th className="px-2 py-2">Số Seal</th>
-                            <th className="px-2 py-2 w-24">Loại Cont</th>
-                            <th className="px-2 py-2">Ghi chú</th>
-                            <th className="px-2 py-2 w-10"></th>
+                            <th className="px-2.5 py-2 w-10 text-center">#</th>
+                            <th className="px-2.5 py-2">Số Container</th>
+                            <th className="px-2.5 py-2 w-32">Loại Cont</th>
+                            <th className="px-2.5 py-2 w-12 text-right">Xóa</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {list.length === 0 ? (
                             <tr>
-                              <td colSpan={6} className="px-3 py-6 text-center text-slate-400">
-                                Bấm &quot;Xử lý ảnh bằng AI&quot; để tự động đọc số cont từ ảnh Tally, hoặc bấm &quot;+ Thêm dòng cont&quot; bên dưới.
+                              <td colSpan={5} className="px-3 py-6 text-center text-slate-400">
+                                Bấm &quot;Xử lý ảnh bằng AI&quot; để trích xuất Số Container &amp; Loại Cont, hoặc bấm &quot;+ Thêm dòng cont&quot;.
                               </td>
                             </tr>
                           ) : (
@@ -639,7 +503,7 @@ export function VoyageTallyPhotosTab({
                                 existingSet.has(c.container_no.trim().toUpperCase());
                               return (
                                 <tr key={rIdx} className="hover:bg-slate-50">
-                                  <td className="px-2 py-1.5 text-center">
+                                  <td className="px-2.5 py-1.5 text-center">
                                     <input
                                       type="checkbox"
                                       checked={Boolean(checks[rIdx])}
@@ -654,8 +518,11 @@ export function VoyageTallyPhotosTab({
                                       }
                                     />
                                   </td>
-                                  <td className="px-2 py-1.5">
-                                    <div className="flex items-center gap-1">
+                                  <td className="px-2.5 py-1.5 text-center text-slate-500">
+                                    {rIdx + 1}
+                                  </td>
+                                  <td className="px-2.5 py-1.5">
+                                    <div className="flex items-center gap-1.5">
                                       <input
                                         type="text"
                                         value={c.container_no}
@@ -665,7 +532,7 @@ export function VoyageTallyPhotosTab({
                                           })
                                         }
                                         placeholder="MSBU1514898"
-                                        className="w-32 border border-slate-300 rounded px-2 py-1 font-mono font-semibold text-xs uppercase bg-white"
+                                        className="w-40 border border-slate-300 rounded px-2.5 py-1 font-mono font-semibold text-xs uppercase bg-white"
                                       />
                                       {dupExisting && (
                                         <span
@@ -677,20 +544,7 @@ export function VoyageTallyPhotosTab({
                                       )}
                                     </div>
                                   </td>
-                                  <td className="px-2 py-1.5">
-                                    <input
-                                      type="text"
-                                      value={c.seal_no || ''}
-                                      onChange={(e) =>
-                                        updateDraftItem(photo.id, rIdx, {
-                                          seal_no: e.target.value.toUpperCase(),
-                                        })
-                                      }
-                                      placeholder="Seal..."
-                                      className="w-24 border border-slate-300 rounded px-2 py-1 font-mono text-xs uppercase bg-white"
-                                    />
-                                  </td>
-                                  <td className="px-2 py-1.5">
+                                  <td className="px-2.5 py-1.5">
                                     <select
                                       value={c.cont_type}
                                       onChange={(e) =>
@@ -698,7 +552,7 @@ export function VoyageTallyPhotosTab({
                                           cont_type: e.target.value as ContType,
                                         })
                                       }
-                                      className="border border-slate-300 rounded px-1.5 py-1 text-xs font-semibold bg-white"
+                                      className="w-full border border-slate-300 rounded px-2 py-1 text-xs font-semibold bg-white"
                                     >
                                       {CONT_TYPES.map((ct) => (
                                         <option key={ct} value={ct}>
@@ -707,18 +561,7 @@ export function VoyageTallyPhotosTab({
                                       ))}
                                     </select>
                                   </td>
-                                  <td className="px-2 py-1.5">
-                                    <input
-                                      type="text"
-                                      value={c.notes || ''}
-                                      onChange={(e) =>
-                                        updateDraftItem(photo.id, rIdx, { notes: e.target.value })
-                                      }
-                                      placeholder="Ghi chú..."
-                                      className="w-full min-w-[90px] border border-slate-300 rounded px-2 py-1 text-xs bg-white"
-                                    />
-                                  </td>
-                                  <td className="px-2 py-1.5 text-right">
+                                  <td className="px-2.5 py-1.5 text-right">
                                     <button
                                       type="button"
                                       onClick={() => removeCandidate(photo.id, rIdx)}

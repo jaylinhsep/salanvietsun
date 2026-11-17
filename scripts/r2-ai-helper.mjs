@@ -275,12 +275,12 @@ export async function runAiContainerExtraction({ imageBuffer, mimeType, override
   }
   const prompt = [
     'Bạn là trợ lý nghiệp vụ cảng biển & vận tải thủy nội địa.',
-    'Hãy đọc kỹ ảnh biên bản Tally / Phiếu giao nhận container này (có thể là chữ viết tay hoặc bản in).',
-    'Trích xuất TOÀN BỘ danh sách số container xuất hiện trong ảnh.',
-    'Chuẩn số container ISO 6346 gồm 4 chữ cái viết hoa + 7 chữ số (ví dụ: MSBU1514898). Bỏ dấu gạch ngang hoặc khoảng trắng thừa.',
-    'Với mỗi container, hãy trả về JSON array đúng cấu trúc sau (CHỈ trả JSON array):',
-    '[{"container_no":"MSBU1514898","seal_no":"SL12345","cont_type":"20F","notes":"","confidence":"HIGH"}]',
-    'Quy ước cont_type chỉ nhận: "20E", "20F", "40E", "40F". Nếu không rõ mặc định "20F".',
+    'Hãy đọc kỹ ảnh biên bản Tally / Barge Discharge Report này (chữ viết tay hoặc bản in).',
+    'CHỈ trích xuất 2 thông tin cho mỗi container: SỐ CONTAINER (container_no) và LOẠI CONT (cont_type). KHÔNG cần trích số seal hay ghi chú.',
+    'Chuẩn số container ISO 6346 gồm 4 chữ cái viết hoa + 7 chữ số (ví dụ: BMOU1614643, MSBU1514898). Bỏ dấu gạch ngang hoặc khoảng trắng thừa.',
+    'Quy ước cont_type chỉ nhận đúng 1 trong 4 giá trị dựa vào kích cỡ (20 / 40) và trạng thái F/E (Full/Empty): "20E", "20F", "40E", "40F". Ví dụ SIZE=22G1 & F/E=F -> "20F"; SIZE=22G1 & F/E=E -> "20E"; SIZE=45G1/42G1 & F/E=F -> "40F"; SIZE=45G1/42G1 & F/E=E -> "40E". Nếu không rõ thì mặc định "20F".',
+    'Trả về DUY NHẤT JSON array đúng định dạng:',
+    '[{"container_no":"BMOU1614643","cont_type":"20F"}]',
   ].join('\n');
   const base64 = imageBuffer.toString('base64');
 

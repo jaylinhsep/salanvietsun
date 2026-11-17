@@ -51,7 +51,7 @@ export const CAPTAIN_STEPS: {
     step: 1,
     title: '1. Nhận lệnh và gửi Tally',
     shortTitle: 'Nhận lệnh & Gửi Tally',
-    desc: 'Xác nhận lệnh chuyến, chụp hoặc up ảnh biên bản Tally (nén & gửi lên Cloudflare R2)',
+    desc: 'Xác nhận lệnh chuyến, chụp hoặc up ảnh biên bản Tally gửi về điều độ',
   },
   {
     step: 2,

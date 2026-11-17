@@ -481,12 +481,8 @@ export default function MobileCaptainHomePage() {
                                 alt="Tally"
                                 className="w-full h-full object-cover"
                               />
-                              <span
-                                className={`absolute bottom-1 right-1 px-1 py-0.5 rounded text-[9px] font-bold text-white ${
-                                  tp.storage_provider === 'r2' ? 'bg-orange-600/90' : 'bg-emerald-600/90'
-                                }`}
-                              >
-                                {tp.storage_provider === 'r2' ? 'R2' : 'OK'}
+                              <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-600/90 text-white">
+                                Đã gửi ✓
                               </span>
                             </a>
                           ))}
