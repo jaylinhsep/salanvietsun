@@ -273,6 +273,9 @@ export async function loadWorkflowSnapshot(): Promise<WorkflowSnapshot> {
       linkedBookings.length > 0
         ? linkedBookings.map((b) => b.booking_no).join(', ')
         : vy.booking_nos;
+    const totalWeightTons =
+      Math.round(linkedBookings.reduce((s, b) => s + Number(b.total_weight_tons || 0), 0) * 100) /
+      100;
 
     return {
       ...vy,
@@ -280,6 +283,7 @@ export async function loadWorkflowSnapshot(): Promise<WorkflowSnapshot> {
       booking_nos: bookingNos,
       earliest_closing_time: earliestClosing,
       estimated_freight: bookingEst,
+      total_weight_tons: totalWeightTons || Number(vy.total_weight_tons || 0),
     };
   });
 
@@ -298,6 +302,16 @@ export async function createBookingAction(dto: Partial<Booking>): Promise<Bookin
   const c20f = Number(dto.cont_20f || 0);
   const c40e = Number(dto.cont_40e || 0);
   const c40f = Number(dto.cont_40f || 0);
+  const w20e = Math.max(0, Number(dto.weight_per_20e || 0));
+  const w20f = Math.max(0, Number(dto.weight_per_20f || 0));
+  const w40e = Math.max(0, Number(dto.weight_per_40e || 0));
+  const w40f = Math.max(0, Number(dto.weight_per_40f || 0));
+  const computedWeight =
+    Math.round((c20e * w20e + c20f * w20f + c40e * w40e + c40f * w40f) * 100) / 100;
+  const total_weight_tons =
+    w20e > 0 || w20f > 0 || w40e > 0 || w40f > 0
+      ? computedWeight
+      : Math.max(0, Number(dto.total_weight_tons || 0));
   const total_teus = c20e + c20f + (c40e + c40f) * 2;
 
   try {
@@ -325,6 +339,11 @@ export async function createBookingAction(dto: Partial<Booking>): Promise<Bookin
     cont_20f: c20f,
     cont_40e: c40e,
     cont_40f: c40f,
+    weight_per_20e: w20e,
+    weight_per_20f: w20f,
+    weight_per_40e: w40e,
+    weight_per_40f: w40f,
+    total_weight_tons,
     total_teus,
     closing_time: dto.closing_time,
     voyage_id: null,
@@ -346,6 +365,16 @@ export async function updateBookingAction(
   const c20f = Number(dto.cont_20f || 0);
   const c40e = Number(dto.cont_40e || 0);
   const c40f = Number(dto.cont_40f || 0);
+  const w20e = Math.max(0, Number(dto.weight_per_20e || 0));
+  const w20f = Math.max(0, Number(dto.weight_per_20f || 0));
+  const w40e = Math.max(0, Number(dto.weight_per_40e || 0));
+  const w40f = Math.max(0, Number(dto.weight_per_40f || 0));
+  const computedWeight =
+    Math.round((c20e * w20e + c20f * w20f + c40e * w40e + c40f * w40f) * 100) / 100;
+  const total_weight_tons =
+    w20e > 0 || w20f > 0 || w40e > 0 || w40f > 0
+      ? computedWeight
+      : Math.max(0, Number(dto.total_weight_tons || 0));
   const total_teus = c20e + c20f + (c40e + c40f) * 2;
 
   try {
@@ -380,6 +409,11 @@ export async function updateBookingAction(
       cont_20f: c20f,
       cont_40e: c40e,
       cont_40f: c40f,
+      weight_per_20e: Number(dto.weight_per_20e ?? b.weight_per_20e ?? 0),
+      weight_per_20f: Number(dto.weight_per_20f ?? b.weight_per_20f ?? 0),
+      weight_per_40e: Number(dto.weight_per_40e ?? b.weight_per_40e ?? 0),
+      weight_per_40f: Number(dto.weight_per_40f ?? b.weight_per_40f ?? 0),
+      total_weight_tons: Math.round((c20e * Number(dto.weight_per_20e ?? b.weight_per_20e ?? 0) + c20f * Number(dto.weight_per_20f ?? b.weight_per_20f ?? 0) + c40e * Number(dto.weight_per_40e ?? b.weight_per_40e ?? 0) + c40f * Number(dto.weight_per_40f ?? b.weight_per_40f ?? 0)) * 100) / 100 || Number(dto.total_weight_tons ?? b.total_weight_tons ?? 0),
       total_teus,
       closing_time: dto.closing_time,
       estimated_freight: Number(dto.estimated_freight ?? b.estimated_freight ?? 0),

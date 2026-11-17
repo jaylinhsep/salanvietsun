@@ -79,6 +79,11 @@ export class DispatchService implements OnModuleInit {
         ALTER TABLE vessels ADD COLUMN IF NOT EXISTS is_vendor_barge BOOLEAN NOT NULL DEFAULT FALSE;
         ALTER TABLE vessels ADD COLUMN IF NOT EXISTS notes TEXT;
         ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pic_name VARCHAR(100);
+        ALTER TABLE bookings ADD COLUMN IF NOT EXISTS weight_per_20e NUMERIC(10, 2) NOT NULL DEFAULT 0;
+        ALTER TABLE bookings ADD COLUMN IF NOT EXISTS weight_per_20f NUMERIC(10, 2) NOT NULL DEFAULT 0;
+        ALTER TABLE bookings ADD COLUMN IF NOT EXISTS weight_per_40e NUMERIC(10, 2) NOT NULL DEFAULT 0;
+        ALTER TABLE bookings ADD COLUMN IF NOT EXISTS weight_per_40f NUMERIC(10, 2) NOT NULL DEFAULT 0;
+        ALTER TABLE bookings ADD COLUMN IF NOT EXISTS total_weight_tons NUMERIC(12, 2) NOT NULL DEFAULT 0;
         ALTER TABLE voyages DROP CONSTRAINT IF EXISTS voyages_voyage_no_key;
 
         ALTER TABLE voyages ADD COLUMN IF NOT EXISTS workflow_step INT DEFAULT 0;
@@ -245,7 +250,8 @@ export class DispatchService implements OnModuleInit {
         COALESCE(vy.other_cost, 0)::float AS other_cost,
         vy.pod_photo_url, vy.fuel_start_photo_url, vy.fuel_end_photo_url,
         COALESCE(vy.captain_report_log, '[]'::jsonb) AS captain_report_log,
-        bk.booking_nos, bk.earliest_closing_time
+        bk.booking_nos, bk.earliest_closing_time,
+        COALESCE(bk.total_weight_tons, 0)::float AS total_weight_tons
       FROM voyages vy
       LEFT JOIN customers c ON c.id = vy.customer_id
       LEFT JOIN vessels v ON v.id = vy.vessel_id
@@ -266,7 +272,8 @@ export class DispatchService implements OnModuleInit {
         SELECT
           voyage_id,
           STRING_AGG(booking_no, ', ' ORDER BY created_at ASC) AS booking_nos,
-          MIN(closing_time) AS earliest_closing_time
+          MIN(closing_time) AS earliest_closing_time,
+          COALESCE(SUM(total_weight_tons), 0) AS total_weight_tons
         FROM bookings
         WHERE voyage_id IS NOT NULL
         GROUP BY voyage_id
@@ -928,6 +935,11 @@ export class DispatchService implements OnModuleInit {
     const res = await this.db.query(`
       SELECT
         b.*, b.estimated_freight::float,
+        COALESCE(b.weight_per_20e, 0)::float AS weight_per_20e,
+        COALESCE(b.weight_per_20f, 0)::float AS weight_per_20f,
+        COALESCE(b.weight_per_40e, 0)::float AS weight_per_40e,
+        COALESCE(b.weight_per_40f, 0)::float AS weight_per_40f,
+        COALESCE(b.total_weight_tons, 0)::float AS total_weight_tons,
         COALESCE(c.name, b.customer_name) AS resolved_customer_name,
         c.code AS customer_code,
         COALESCE(op.name, b.origin_name) AS resolved_origin_name,
@@ -951,6 +963,16 @@ export class DispatchService implements OnModuleInit {
     const c20f = Number(dto.cont_20f || 0);
     const c40e = Number(dto.cont_40e || 0);
     const c40f = Number(dto.cont_40f || 0);
+    const w20e = Math.max(0, Number(dto.weight_per_20e || 0));
+    const w20f = Math.max(0, Number(dto.weight_per_20f || 0));
+    const w40e = Math.max(0, Number(dto.weight_per_40e || 0));
+    const w40f = Math.max(0, Number(dto.weight_per_40f || 0));
+    const computedWeight =
+      Math.round((c20e * w20e + c20f * w20f + c40e * w40e + c40f * w40f) * 100) / 100;
+    const totalWeightTons =
+      w20e > 0 || w20f > 0 || w40e > 0 || w40f > 0
+        ? computedWeight
+        : Math.max(0, Number(dto.total_weight_tons || 0));
     const dir = String(dto.cargo_direction || 'EXPORT').toUpperCase() === 'IMPORT' ? 'IMPORT' : 'EXPORT';
     return {
       booking_no: String(dto.booking_no || `BK-${Date.now().toString().slice(-6)}`).trim().toUpperCase(),
@@ -965,6 +987,11 @@ export class DispatchService implements OnModuleInit {
       c20f,
       c40e,
       c40f,
+      w20e,
+      w20f,
+      w40e,
+      w40f,
+      totalWeightTons,
       totalTeus: this.computeTeus(c20e, c20f, c40e, c40f),
       closing_time: dto.closing_time || null,
       estimated_freight: Number(dto.estimated_freight || 0),
@@ -980,8 +1007,9 @@ export class DispatchService implements OnModuleInit {
         booking_no, cargo_direction, customer_id, customer_name,
         origin_port_id, origin_name, destination_port_id, dest_name,
         cont_20e, cont_20f, cont_40e, cont_40f, total_teus,
+        weight_per_20e, weight_per_20f, weight_per_40e, weight_per_40f, total_weight_tons,
         closing_time, estimated_freight, notes, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'PENDING')
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'PENDING')
       RETURNING *
       `,
       [
@@ -998,6 +1026,11 @@ export class DispatchService implements OnModuleInit {
         b.c40e,
         b.c40f,
         b.totalTeus,
+        b.w20e,
+        b.w20f,
+        b.w40e,
+        b.w40f,
+        b.totalWeightTons,
         b.closing_time,
         b.estimated_freight,
         b.notes,
@@ -1026,6 +1059,11 @@ export class DispatchService implements OnModuleInit {
         cont_20f: dto.cont_20f ?? prev.cont_20f,
         cont_40e: dto.cont_40e ?? prev.cont_40e,
         cont_40f: dto.cont_40f ?? prev.cont_40f,
+        weight_per_20e: dto.weight_per_20e ?? prev.weight_per_20e,
+        weight_per_20f: dto.weight_per_20f ?? prev.weight_per_20f,
+        weight_per_40e: dto.weight_per_40e ?? prev.weight_per_40e,
+        weight_per_40f: dto.weight_per_40f ?? prev.weight_per_40f,
+        total_weight_tons: dto.total_weight_tons ?? prev.total_weight_tons,
         closing_time: dto.closing_time !== undefined ? dto.closing_time : prev.closing_time,
         estimated_freight:
           dto.estimated_freight !== undefined ? dto.estimated_freight : prev.estimated_freight,
@@ -1092,9 +1130,14 @@ export class DispatchService implements OnModuleInit {
           cont_40e = $12,
           cont_40f = $13,
           total_teus = $14,
-          closing_time = $15,
-          estimated_freight = $16,
-          notes = $17,
+          weight_per_20e = $15,
+          weight_per_20f = $16,
+          weight_per_40e = $17,
+          weight_per_40f = $18,
+          total_weight_tons = $19,
+          closing_time = $20,
+          estimated_freight = $21,
+          notes = $22,
           updated_at = NOW()
         WHERE id = $1
         RETURNING *
@@ -1114,6 +1157,11 @@ export class DispatchService implements OnModuleInit {
           b.c40e,
           b.c40f,
           b.totalTeus,
+          b.w20e,
+          b.w20f,
+          b.w40e,
+          b.w40f,
+          b.totalWeightTons,
           b.closing_time,
           b.estimated_freight,
           b.notes,

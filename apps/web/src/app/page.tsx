@@ -75,6 +75,11 @@ export default function DispatchCenterHomePage() {
     cont_20f: 4,
     cont_40e: 0,
     cont_40f: 2,
+    weight_per_20e: 0,
+    weight_per_20f: 0,
+    weight_per_40e: 0,
+    weight_per_40f: 0,
+    check_vessel_id: '',
     closing_time: toLocalDateTimeInput(),
     estimated_freight: 12000000,
     notes: '',
@@ -158,6 +163,18 @@ export default function DispatchCenterHomePage() {
   );
 
   const selectedTeus = selectedBookings.reduce((s, b) => s + Number(b.total_teus || 0), 0);
+  const selectedWeightTons =
+    Math.round(selectedBookings.reduce((s, b) => s + Number(b.total_weight_tons || 0), 0) * 100) /
+    100;
+
+  const bookingModalTotalWeightTons =
+    Math.round(
+      (Number(bookingForm.cont_20e || 0) * Number(bookingForm.weight_per_20e || 0) +
+        Number(bookingForm.cont_20f || 0) * Number(bookingForm.weight_per_20f || 0) +
+        Number(bookingForm.cont_40e || 0) * Number(bookingForm.weight_per_40e || 0) +
+        Number(bookingForm.cont_40f || 0) * Number(bookingForm.weight_per_40f || 0)) *
+        100,
+    ) / 100;
 
   const handleOpenBookingModal = () => {
     setEditingBookingId(null);
@@ -174,6 +191,11 @@ export default function DispatchCenterHomePage() {
       cont_20f: 4,
       cont_40e: 0,
       cont_40f: 2,
+      weight_per_20e: 0,
+      weight_per_20f: 0,
+      weight_per_40e: 0,
+      weight_per_40f: 0,
+      check_vessel_id: '',
       closing_time: toLocalDateTimeInput(),
       estimated_freight: 12000000,
       notes: '',
@@ -206,6 +228,11 @@ export default function DispatchCenterHomePage() {
       cont_20f: Number(bk.cont_20f || 0),
       cont_40e: Number(bk.cont_40e || 0),
       cont_40f: Number(bk.cont_40f || 0),
+      weight_per_20e: Number(bk.weight_per_20e || 0),
+      weight_per_20f: Number(bk.weight_per_20f || 0),
+      weight_per_40e: Number(bk.weight_per_40e || 0),
+      weight_per_40f: Number(bk.weight_per_40f || 0),
+      check_vessel_id: '',
       closing_time: toLocalDateTimeInput(bk.closing_time),
       estimated_freight: Number(bk.estimated_freight || 0),
       notes: bk.notes || '',
@@ -231,6 +258,11 @@ export default function DispatchCenterHomePage() {
       cont_20f: Number(bookingForm.cont_20f || 0),
       cont_40e: Number(bookingForm.cont_40e || 0),
       cont_40f: Number(bookingForm.cont_40f || 0),
+      weight_per_20e: Number(bookingForm.weight_per_20e || 0),
+      weight_per_20f: Number(bookingForm.weight_per_20f || 0),
+      weight_per_40e: Number(bookingForm.weight_per_40e || 0),
+      weight_per_40f: Number(bookingForm.weight_per_40f || 0),
+      total_weight_tons: bookingModalTotalWeightTons,
       closing_time: bookingForm.closing_time
         ? new Date(bookingForm.closing_time).toISOString()
         : undefined,
@@ -618,9 +650,16 @@ export default function DispatchCenterHomePage() {
                         20E: <b>{bk.cont_20e}</b> • 20F: <b>{bk.cont_20f}</b> • 40E:{' '}
                         <b>{bk.cont_40e}</b> • 40F: <b>{bk.cont_40f}</b>
                       </div>
-                      <span className="px-2 py-0.5 rounded bg-navy-900 text-white font-bold">
-                        {bk.total_teus} TEU
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {Number(bk.total_weight_tons || 0) > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700 font-bold">
+                            {Number(bk.total_weight_tons).toLocaleString('vi-VN')} Tấn
+                          </span>
+                        )}
+                        <span className="px-2 py-0.5 rounded bg-navy-900 text-white font-bold">
+                          {bk.total_teus} TEU
+                        </span>
+                      </div>
                     </div>
 
                     {bk.notes && (
@@ -642,7 +681,7 @@ export default function DispatchCenterHomePage() {
               </h2>
               <p className="text-[11px] text-slate-500">
                 {selectedBookings.length > 0
-                  ? `Đang chọn ${selectedBookings.length} booking (${selectedTeus} TEUs) — bấm "Ghép vào tàu này" để tạo/ghép chuyến ngay`
+                  ? `Đang chọn ${selectedBookings.length} booking (${selectedTeus} TEUs${selectedWeightTons > 0 ? ` • ${selectedWeightTons.toLocaleString('vi-VN')} Tấn` : ''}) — bấm "Ghép vào tàu này" để tạo/ghép chuyến ngay`
                   : 'Chọn Booking ở cột trái để ghép 1 chạm, hoặc bấm Chi tiết Cont / Vị trí AIS trên từng tàu'}
               </p>
             </div>
@@ -683,10 +722,27 @@ export default function DispatchCenterHomePage() {
                 selectedBookings.length === 0 && draggedBookingId
                   ? Number(pendingBookings.find((b) => b.id === draggedBookingId)?.total_teus || 0)
                   : selectedTeus;
+              const dragFallbackWeightTons =
+                selectedBookings.length === 0 && draggedBookingId
+                  ? Number(pendingBookings.find((b) => b.id === draggedBookingId)?.total_weight_tons || 0)
+                  : selectedWeightTons;
               const canAssign = selectedBookings.length > 0 || draggedBookingId !== null;
               const maxTeu = Number(v.capacity_teu || 0);
+              const maxTons = Number(v.capacity_tons || 0);
+              const limit85Tons = Math.round(maxTons * 0.85 * 10) / 10;
+              const attachedWeightTons =
+                attachedBookings.length > 0
+                  ? Math.round(
+                      attachedBookings.reduce((s, b) => s + Number(b.total_weight_tons || 0), 0) * 100,
+                    ) / 100
+                  : Number(activeVy?.total_weight_tons || 0);
               const canAttachPlanned = Boolean(activeVy && activeVy.status === 'PLANNED');
               const projectedAttachTeus = Number(activeVy?.total_teus || 0) + dragFallbackTeus;
+              const projectedWeightTons = canAttachPlanned
+                ? Math.round((attachedWeightTons + dragFallbackWeightTons) * 100) / 100
+                : Math.round(dragFallbackWeightTons * 100) / 100;
+              const over85Current = maxTons > 0 && attachedWeightTons > limit85Tons;
+              const over85Projected = canAssign && maxTons > 0 && projectedWeightTons > limit85Tons;
               const overAttach = canAssign && canAttachPlanned && projectedAttachTeus > maxTeu;
               const overNew = canAssign && dragFallbackTeus > maxTeu;
 
@@ -753,6 +809,28 @@ export default function DispatchCenterHomePage() {
                     </div>
                   )}
 
+                  {canAssign && dragFallbackWeightTons > 0 && (
+                    <div
+                      className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold flex items-center justify-between gap-2 ${
+                        over85Projected
+                          ? 'bg-rose-100 border-rose-400 text-rose-900'
+                          : 'bg-rose-50 border-rose-200 text-rose-700'
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        {over85Projected && <AlertTriangle className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />}
+                        Trọng lượng sau khi ghép: {projectedWeightTons.toLocaleString('vi-VN')} /{' '}
+                        {maxTons.toLocaleString('vi-VN')} Tấn (
+                        {maxTons > 0 ? Math.round((projectedWeightTons / maxTons) * 100) : 0}%)
+                      </span>
+                      {over85Projected && (
+                        <span className="text-[10px] uppercase bg-rose-600 text-white px-1.5 py-0.5 rounded">
+                          Cảnh báo &gt;85% ({limit85Tons}T)
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {/* Active Voyage Box (Clickable -> opens Voyage Overview & TEU Breakdown Popup) */}
                   {activeVy ? (
                     <div
@@ -787,6 +865,22 @@ export default function DispatchCenterHomePage() {
                           {activeVy.total_teus || 0} / {maxTeu} TEUs
                         </span>
                       </div>
+
+                      {/* Red Weight Control Box for Bookings Assigned to This Voyage */}
+                      {(attachedBookings.length > 0 || attachedWeightTons > 0) && (
+                        <div className="rounded-md bg-rose-50 border border-rose-300 px-2.5 py-1.5 text-[11px] font-bold text-rose-700 flex items-center justify-between gap-2">
+                          <span>
+                            Trọng lượng đã nhận: {attachedWeightTons.toLocaleString('vi-VN')} /{' '}
+                            {maxTons.toLocaleString('vi-VN')} Tấn (
+                            {maxTons > 0 ? Math.round((attachedWeightTons / maxTons) * 100) : 0}%)
+                          </span>
+                          {over85Current && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px]">
+                              <AlertTriangle className="w-3 h-3" /> Vượt 85% ({limit85Tons}T)
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       {/* Linked Bookings List with Individual Unassign */}
                       {attachedBookings.length > 0 ? (
@@ -1075,34 +1169,146 @@ export default function DispatchCenterHomePage() {
               </div>
             </div>
 
-            <div className="bg-slate-50 border rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
-                <span>Số lượng Container (20E / 20F / 40E / 40F)</span>
-                <span className="text-rose-700">
-                  Tổng:{' '}
-                  {bookingForm.cont_20e +
-                    bookingForm.cont_20f +
-                    (bookingForm.cont_40e + bookingForm.cont_40f) * 2}{' '}
-                  TEUs
-                </span>
+            <div className="bg-slate-50 border rounded-lg p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-700">
+                <span>Số lượng &amp; Trọng lượng Container (20E / 20F / 40E / 40F)</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-rose-700">
+                    Tổng:{' '}
+                    {bookingForm.cont_20e +
+                      bookingForm.cont_20f +
+                      (bookingForm.cont_40e + bookingForm.cont_40f) * 2}{' '}
+                    TEUs
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-bold">
+                    {bookingModalTotalWeightTons.toLocaleString('vi-VN')} Tấn
+                  </span>
+                </div>
               </div>
               <div className="grid grid-cols-4 gap-2 text-xs">
-                {(['cont_20e', 'cont_20f', 'cont_40e', 'cont_40f'] as const).map((k) => (
-                  <div key={k}>
-                    <label className="text-[11px] text-slate-500 uppercase">
-                      {k.replace('cont_', '')}
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white text-center font-bold"
-                      value={bookingForm[k]}
-                      onChange={(e) =>
-                        setBookingForm({ ...bookingForm, [k]: Number(e.target.value) })
-                      }
-                    />
-                  </div>
-                ))}
+                {(
+                  [
+                    { qtyKey: 'cont_20e', wtKey: 'weight_per_20e', label: '20E' },
+                    { qtyKey: 'cont_20f', wtKey: 'weight_per_20f', label: '20F' },
+                    { qtyKey: 'cont_40e', wtKey: 'weight_per_40e', label: '40E' },
+                    { qtyKey: 'cont_40f', wtKey: 'weight_per_40f', label: '40F' },
+                  ] as const
+                ).map(({ qtyKey, wtKey, label }) => {
+                  const qty = Number(bookingForm[qtyKey] || 0);
+                  const wt = Number(bookingForm[wtKey] || 0);
+                  const subTons = Math.round(qty * wt * 100) / 100;
+                  return (
+                    <div key={qtyKey} className="space-y-1.5">
+                      <div>
+                        <label className="text-[11px] text-slate-500 uppercase font-semibold block">
+                          {label} (SL)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          className="w-full border rounded px-2 py-1.5 mt-0.5 bg-white text-center font-bold"
+                          value={bookingForm[qtyKey]}
+                          onChange={(e) =>
+                            setBookingForm({ ...bookingForm, [qtyKey]: Math.max(0, Number(e.target.value)) })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-500 block">
+                          TL/cont (Tấn)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.1"
+                          placeholder="0"
+                          className="w-full border border-rose-200 rounded px-2 py-1 mt-0.5 bg-white text-center text-xs font-semibold text-rose-700"
+                          value={bookingForm[wtKey]}
+                          onChange={(e) =>
+                            setBookingForm({ ...bookingForm, [wtKey]: Math.max(0, Number(e.target.value)) })
+                          }
+                        />
+                      </div>
+                      <div className="text-[10px] text-center text-slate-500 font-medium tabular-nums">
+                        = <b className="text-slate-800">{subTons.toLocaleString('vi-VN')}</b> T
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Target Barge 85% Weight Capacity Check */}
+              <div className="pt-2 border-t border-slate-200 space-y-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-[11px] font-semibold text-slate-600">
+                    Sà lan dự kiến (kiểm tra ngưỡng 85% trọng tải):
+                  </label>
+                  <select
+                    className="border rounded-lg px-2.5 py-1 bg-white text-xs font-medium"
+                    value={bookingForm.check_vessel_id}
+                    onChange={(e) =>
+                      setBookingForm({ ...bookingForm, check_vessel_id: e.target.value })
+                    }
+                  >
+                    <option value="">-- Tự đối chiếu đội tàu chính (NV18/36/38) --</option>
+                    {vessels
+                      .filter((v) => Number(v.capacity_tons || 0) > 0)
+                      .map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name} ({v.code}) — 85% = {(Number(v.capacity_tons || 0) * 0.85).toFixed(1)}T / {v.capacity_tons}T
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {bookingModalTotalWeightTons > 0 && (() => {
+                  const chosen = vessels.find((v) => v.id === bookingForm.check_vessel_id);
+                  if (chosen) {
+                    const cap = Number(chosen.capacity_tons || 0);
+                    const limit85 = Math.round(cap * 0.85 * 10) / 10;
+                    const pct = cap > 0 ? Math.round((bookingModalTotalWeightTons / cap) * 100) : 0;
+                    if (cap > 0 && bookingModalTotalWeightTons > limit85) {
+                      return (
+                        <div className="rounded-lg bg-rose-50 border border-rose-300 px-3 py-2 text-rose-800 font-semibold flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                          <span>
+                            Cảnh báo: Trọng lượng booking ({bookingModalTotalWeightTons.toLocaleString('vi-VN')} Tấn) vượt quá 85% sức chở của {chosen.name} (ngưỡng 85% = {limit85.toLocaleString('vi-VN')} T / {cap.toLocaleString('vi-VN')} T — chiếm {pct}%)!
+                          </span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-1.5 text-emerald-800 font-medium">
+                        Đạt ngưỡng an toàn tải trọng của {chosen.name}: {bookingModalTotalWeightTons.toLocaleString('vi-VN')} / {cap.toLocaleString('vi-VN')} Tấn ({pct}% ≤ 85%).
+                      </div>
+                    );
+                  }
+
+                  const fleetCandidates = vessels.filter(
+                    (v) => Number(v.capacity_tons || 0) > 0 && !(v as any).is_vendor_barge,
+                  );
+                  const exceeded = fleetCandidates.filter(
+                    (v) => bookingModalTotalWeightTons > Number(v.capacity_tons || 0) * 0.85,
+                  );
+                  if (exceeded.length > 0) {
+                    return (
+                      <div className="rounded-lg bg-rose-50 border border-rose-300 px-3 py-2 text-rose-800 font-semibold flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                        <span>
+                          Cảnh báo: Tổng trọng lượng ({bookingModalTotalWeightTons.toLocaleString('vi-VN')} Tấn) vượt quá 85% trọng tải của:{' '}
+                          {exceeded
+                            .map(
+                              (v) =>
+                                `${v.name} (85% = ${(Number(v.capacity_tons || 0) * 0.85).toFixed(1)}T / ${v.capacity_tons}T)`,
+                            )
+                            .join(', ')}
+                          !
+                        </span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
 

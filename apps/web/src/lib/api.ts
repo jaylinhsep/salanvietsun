@@ -122,6 +122,7 @@ export interface Voyage {
   booking_nos?: string;
   earliest_closing_time?: string;
   estimated_freight?: number;
+  total_weight_tons?: number;
   created_at?: string;
 }
 
@@ -152,6 +153,11 @@ export interface Booking {
   cont_40e: number;
   cont_40f: number;
   total_teus: number;
+  weight_per_20e?: number;
+  weight_per_20f?: number;
+  weight_per_40e?: number;
+  weight_per_40f?: number;
+  total_weight_tons?: number;
   closing_time?: string;
   voyage_id?: string | null;
   voyage_no?: string | null;

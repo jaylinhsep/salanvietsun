@@ -356,6 +356,8 @@ function hydrateVoyage(db, vy) {
   );
   const detailRev = details.reduce((s, c) => s + Number(c.total_amount || 0), 0);
   const estFreight = linkedBookings.reduce((s, b) => s + Number(b.estimated_freight || 0), 0);
+  const totalWeightTons =
+    Math.round(linkedBookings.reduce((s, b) => s + Number(b.total_weight_tons || 0), 0) * 100) / 100;
   const bookingNos =
     linkedBookings.length > 0 ? linkedBookings.map((b) => b.booking_no).join(', ') : vy.booking_nos;
   const earliestClosing =
@@ -386,6 +388,7 @@ function hydrateVoyage(db, vy) {
     booking_nos: bookingNos,
     earliest_closing_time: earliestClosing,
     estimated_freight: estFreight || vy.estimated_freight || 0,
+    total_weight_tons: totalWeightTons || Number(vy.total_weight_tons || 0),
   };
 }
 
@@ -800,6 +803,20 @@ const server = http.createServer(async (req, res) => {
     }
     if (m === 'POST' && p === '/api/dispatch/bookings') {
       const body = await readBody(req);
+      const c20e = Number(body.cont_20e || 0);
+      const c20f = Number(body.cont_20f || 0);
+      const c40e = Number(body.cont_40e || 0);
+      const c40f = Number(body.cont_40f || 0);
+      const w20e = Math.max(0, Number(body.weight_per_20e || 0));
+      const w20f = Math.max(0, Number(body.weight_per_20f || 0));
+      const w40e = Math.max(0, Number(body.weight_per_40e || 0));
+      const w40f = Math.max(0, Number(body.weight_per_40f || 0));
+      const computedWeight =
+        Math.round((c20e * w20e + c20f * w20f + c40e * w40e + c40f * w40f) * 100) / 100;
+      const totalWeightTons =
+        w20e > 0 || w20f > 0 || w40e > 0 || w40f > 0
+          ? computedWeight
+          : Math.max(0, Number(body.total_weight_tons || 0));
       const bk = {
         id: uuid(),
         booking_no: String(body.booking_no || `BK-${Date.now().toString().slice(-5)}`)
@@ -812,11 +829,16 @@ const server = http.createServer(async (req, res) => {
         origin_name: body.origin_name || null,
         destination_port_id: body.destination_port_id || null,
         dest_name: body.dest_name || null,
-        cont_20e: Number(body.cont_20e || 0),
-        cont_20f: Number(body.cont_20f || 0),
-        cont_40e: Number(body.cont_40e || 0),
-        cont_40f: Number(body.cont_40f || 0),
-        total_teus: computeTeus(body.cont_20e, body.cont_20f, body.cont_40e, body.cont_40f),
+        cont_20e: c20e,
+        cont_20f: c20f,
+        cont_40e: c40e,
+        cont_40f: c40f,
+        weight_per_20e: w20e,
+        weight_per_20f: w20f,
+        weight_per_40e: w40e,
+        weight_per_40f: w40f,
+        total_weight_tons: totalWeightTons,
+        total_teus: computeTeus(c20e, c20f, c40e, c40f),
         closing_time: body.closing_time || null,
         voyage_id: null,
         status: 'PENDING',
@@ -1041,10 +1063,29 @@ const server = http.createServer(async (req, res) => {
         cont_20f: Number(body.cont_20f ?? prev.cont_20f ?? 0),
         cont_40e: Number(body.cont_40e ?? prev.cont_40e ?? 0),
         cont_40f: Number(body.cont_40f ?? prev.cont_40f ?? 0),
+        weight_per_20e: Math.max(0, Number(body.weight_per_20e ?? prev.weight_per_20e ?? 0)),
+        weight_per_20f: Math.max(0, Number(body.weight_per_20f ?? prev.weight_per_20f ?? 0)),
+        weight_per_40e: Math.max(0, Number(body.weight_per_40e ?? prev.weight_per_40e ?? 0)),
+        weight_per_40f: Math.max(0, Number(body.weight_per_40f ?? prev.weight_per_40f ?? 0)),
         estimated_freight: Number(body.estimated_freight ?? prev.estimated_freight ?? 0),
         updated_at: nowIso(),
       };
       next.total_teus = computeTeus(next.cont_20e, next.cont_20f, next.cont_40e, next.cont_40f);
+      const nextComputedW =
+        Math.round(
+          (next.cont_20e * next.weight_per_20e +
+            next.cont_20f * next.weight_per_20f +
+            next.cont_40e * next.weight_per_40e +
+            next.cont_40f * next.weight_per_40f) *
+            100,
+        ) / 100;
+      next.total_weight_tons =
+        next.weight_per_20e > 0 ||
+        next.weight_per_20f > 0 ||
+        next.weight_per_40e > 0 ||
+        next.weight_per_40f > 0
+          ? nextComputedW
+          : Math.max(0, Number(body.total_weight_tons ?? prev.total_weight_tons ?? 0));
       if (prev.voyage_id) {
         const vy = db.voyages.find((v) => v.id === prev.voyage_id);
         if (vy) {

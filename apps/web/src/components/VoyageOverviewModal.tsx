@@ -75,6 +75,13 @@ export function VoyageOverviewModal({
   }, [attachedBookings]);
 
   const maxTeu = Number(vessel?.capacity_teu || 0);
+  const maxTons = Number(vessel?.capacity_tons || 0);
+  const limit85Tons = Math.round(maxTons * 0.85 * 10) / 10;
+  const totalWeightTons =
+    Math.round(attachedBookings.reduce((s, b) => s + Number(b.total_weight_tons || 0), 0) * 100) /
+    100 || Number(voyage.total_weight_tons || 0);
+  const weightPct = maxTons > 0 ? Math.round((totalWeightTons / maxTons) * 100) : 0;
+  const isOver85Weight = maxTons > 0 && totalWeightTons > limit85Tons;
   const isPlanned = voyage.status === 'PLANNED';
 
   // Compute live projected voyage TEUs based on any unsaved inline count adjustments
@@ -234,12 +241,19 @@ export function VoyageOverviewModal({
               )}
             </div>
 
-            <div
-              className={`font-bold text-sm ${
-                isOverCapacity ? 'text-rose-700' : 'text-emerald-700'
-              }`}
-            >
-              Tổng TEU chuyến: {projectedVoyageTeus} / {maxTeu} TEU ({pct}%)
+            <div className="flex flex-wrap items-center gap-3">
+              <div
+                className={`font-bold text-sm ${
+                  isOverCapacity ? 'text-rose-700' : 'text-emerald-700'
+                }`}
+              >
+                Tổng TEU chuyến: {projectedVoyageTeus} / {maxTeu} TEU ({pct}%)
+              </div>
+              <div className="px-2.5 py-1 rounded-md bg-rose-50 border border-rose-300 text-rose-700 font-bold text-xs">
+                Trọng lượng đã nhận: {totalWeightTons.toLocaleString('vi-VN')} /{' '}
+                {maxTons.toLocaleString('vi-VN')} Tấn ({weightPct}%)
+                {isOver85Weight ? ` • ⚠️ >85% (${limit85Tons}T)` : ''}
+              </div>
             </div>
           </div>
 
