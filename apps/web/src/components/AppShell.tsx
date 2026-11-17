@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Anchor,
+  CalendarDays,
   Compass,
   FileSpreadsheet,
   Fuel,
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { href: '/fleet', label: 'Đội sà lan & Thiết bị', icon: Ship },
   { href: '/tracking', label: 'Bản đồ AIS & Dầu', icon: Fuel },
   { href: '/maintenance', label: 'Bảo trì & Sửa chữa', icon: Wrench },
+  { href: '/schedule', label: 'Lịch sà lan', icon: CalendarDays },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -44,8 +46,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [pathname]);
 
-  // Mobileweb PWA uses its own dedicated mobile-first layout
-  if (pathname.startsWith('/mobile')) {
+  // Mobileweb PWA and public /lich page use standalone layouts without admin chrome
+  if (pathname.startsWith('/mobile') || pathname.startsWith('/lich')) {
     return <>{children}</>;
   }
 

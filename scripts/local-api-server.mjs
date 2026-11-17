@@ -656,7 +656,7 @@ function send(res, status, data) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   });
   res.end(JSON.stringify(data));
@@ -791,6 +791,27 @@ const server = http.createServer(async (req, res) => {
       db.ports = db.ports.filter((x) => x.id !== portMatch[1]);
       saveDb(db);
       return send(res, 200, { ok: true });
+    }
+
+    // --- SAILING SCHEDULE (LỊCH SÀ LAN & PUBLIC /lich) ---
+    if (m === 'GET' && p === '/api/dispatch/sailing-schedule') {
+      if (db.sailingSchedule && Array.isArray(db.sailingSchedule.sheets) && db.sailingSchedule.sheets.length > 0) {
+        return send(res, 200, db.sailingSchedule);
+      }
+      return send(res, 200, { active_month: '2026-11', sheets: [] });
+    }
+    if (m === 'PUT' && p === '/api/dispatch/sailing-schedule') {
+      const body = await readBody(req);
+      if (!body || !Array.isArray(body.sheets) || body.sheets.length === 0) {
+        return send(res, 400, { message: 'Dữ liệu lịch chạy sà lan không hợp lệ.' });
+      }
+      db.sailingSchedule = {
+        active_month: String(body.active_month || body.sheets[0].month_key || '2026-11'),
+        sheets: body.sheets,
+        updated_at: nowIso(),
+      };
+      saveDb(db);
+      return send(res, 200, db.sailingSchedule);
     }
 
     // --- BOOKINGS ---

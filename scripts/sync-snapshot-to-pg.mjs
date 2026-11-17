@@ -217,6 +217,11 @@ async function ensureSchema(client) {
       profit NUMERIC(14, 2) NOT NULL DEFAULT 0,
       UNIQUE(year, month, vessel_code)
     );
+    CREATE TABLE IF NOT EXISTS sailing_schedules (
+      id VARCHAR(50) PRIMARY KEY,
+      data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 
@@ -486,6 +491,13 @@ async function run() {
         `INSERT INTO accounting_historical_monthly (year, month, vessel_code, revenue, cost, profit)
          VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (year, month, vessel_code) DO NOTHING`,
         [Number(h.year), Number(h.month), h.vessel_code, Number(h.revenue || 0), Number(h.cost || 0), Number(h.profit || 0)],
+      );
+    }
+    if (snap.sailingSchedule && Array.isArray(snap.sailingSchedule.sheets) && snap.sailingSchedule.sheets.length > 0) {
+      await client.query(
+        `INSERT INTO sailing_schedules (id, data, updated_at)
+         VALUES ('default', $1::jsonb, NOW()) ON CONFLICT (id) DO NOTHING`,
+        [JSON.stringify(snap.sailingSchedule)],
       );
     }
 

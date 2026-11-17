@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { DispatchService } from './dispatch.service';
 
@@ -152,5 +152,17 @@ export class DispatchController {
   @ApiOperation({ summary: 'Cập nhật chi phí nhiên liệu / cảng / lương chuyến để chốt lãi lỗ' })
   updateSettlement(@Param('id') id: string, @Body() body: any) {
     return this.dispatchService.updateVoyageSettlement(id, body);
+  }
+
+  @Get('sailing-schedule')
+  @ApiOperation({ summary: 'Lấy bảng lịch chạy sà lan (Form Excel & Public /lich)' })
+  getSailingSchedule() {
+    return this.dispatchService.getSailingSchedule();
+  }
+
+  @Put('sailing-schedule')
+  @ApiOperation({ summary: 'Lưu / cập nhật bảng lịch chạy sà lan' })
+  saveSailingSchedule(@Body() body: any) {
+    return this.dispatchService.saveSailingSchedule(body);
   }
 }

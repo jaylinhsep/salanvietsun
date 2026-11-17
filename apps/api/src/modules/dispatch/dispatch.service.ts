@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
+import { DEFAULT_SAILING_SCHEDULE } from './sailing-schedule.seed';
 
 @Injectable()
 export class DispatchService implements OnModuleInit {
@@ -101,6 +102,12 @@ export class DispatchService implements OnModuleInit {
         ALTER TABLE voyages ADD COLUMN IF NOT EXISTS fuel_start_photo_url TEXT;
         ALTER TABLE voyages ADD COLUMN IF NOT EXISTS fuel_end_photo_url TEXT;
         ALTER TABLE voyages ADD COLUMN IF NOT EXISTS captain_report_log JSONB DEFAULT '[]'::jsonb;
+
+        CREATE TABLE IF NOT EXISTS sailing_schedules (
+          id VARCHAR(50) PRIMARY KEY,
+          data JSONB NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
       `);
     } catch (err: any) {
       this.logger.warn(`Auto-migration voyages skipped: ${err.message}`);
@@ -1528,5 +1535,48 @@ export class DispatchService implements OnModuleInit {
       ],
     );
     return res.rows[0];
+  }
+
+  async getSailingSchedule() {
+    const res = await this.db.query(
+      `SELECT data, updated_at FROM sailing_schedules WHERE id = 'default' LIMIT 1`,
+    );
+    if (res.rows.length > 0 && res.rows[0]?.data) {
+      return {
+        ...res.rows[0].data,
+        updated_at: res.rows[0].updated_at,
+      };
+    }
+    await this.db.query(
+      `INSERT INTO sailing_schedules (id, data, updated_at)
+       VALUES ('default', $1::jsonb, NOW())
+       ON CONFLICT (id) DO NOTHING`,
+      [JSON.stringify(DEFAULT_SAILING_SCHEDULE)],
+    );
+    return {
+      ...DEFAULT_SAILING_SCHEDULE,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  async saveSailingSchedule(body: any) {
+    if (!body || !Array.isArray(body.sheets) || body.sheets.length === 0) {
+      throw new BadRequestException('Dữ liệu lịch chạy sà lan không hợp lệ.');
+    }
+    const clean = {
+      active_month: String(body.active_month || body.sheets[0].month_key || '2026-11'),
+      sheets: body.sheets,
+    };
+    const res = await this.db.query(
+      `INSERT INTO sailing_schedules (id, data, updated_at)
+       VALUES ('default', $1::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+       RETURNING data, updated_at`,
+      [JSON.stringify(clean)],
+    );
+    return {
+      ...res.rows[0].data,
+      updated_at: res.rows[0].updated_at,
+    };
   }
 }

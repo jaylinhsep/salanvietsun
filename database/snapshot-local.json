@@ -55413,5 +55413,217 @@
       "cost": 340865984,
       "profit": 64745546
     }
-  ]
+  ],
+  "sailingSchedule": {
+    "active_month": "2026-11",
+    "sheets": [
+      {
+        "month_key": "2026-11",
+        "company_name": "VIETSUN CORPORATION- VIETSUN LINES",
+        "address": "Add : No.13-15, B4 Str., An Khanh ward, HCMC.",
+        "tel_fax": "Tel : 84 2838269539 / Fax : 84 2839433114",
+        "email_web": "Email : operation@vietsunlogistic.com / Web : www.vietsunlogistic.com",
+        "title": "LỊCH CHẠY SÀ LAN THÁNG 11/2026 (Update:02/11/2026)",
+        "col_vessel_label": "TÊN PHƯƠNG TIỆN",
+        "group1_title": "HỒ CHÍ MINH",
+        "group1_subtitle": "(TÂN THUẬN/ BẾN NGHÉ/ VICT)",
+        "group2_title": "CẢNG CẦN THƠ & CẢNG TC SADEC",
+        "group2_subtitle": "(CÁI CUI/ HOÀNG DIỆU/SADEC)",
+        "group3_title": "HỒ CHÍ MINH",
+        "footnote": "*Above Sailing Schedule is subject to change with or without prior notice",
+        "contact_title": "CONTACT INFORMATION:",
+        "contacts": [
+          "Mr. Kiều Đình Phi / HP 0968 742 179",
+          "Mr. Phan Thanh Tuấn / HP 0963 753 335",
+          "Mr. Nguyễn Ngọc Hoàng / HP 0902 835 112",
+          "Mr. Nguyễn Hồng Nguyên / HP 035 537 0538",
+          "Ms. Trần Huỳnh Minh Thư / HP 0938 166 965"
+        ],
+        "contact_email": "Email : vstrucking@vietsunlogistic.com",
+        "rows": [
+          {
+            "id": "nov26-01",
+            "vessel_name": "NHẬT VIỆT 18",
+            "hcm_voy": "V18 - 4626W",
+            "hcm_etd": "29/10",
+            "ct_eta": "30/10",
+            "ct_voy": "V18 - 4626E",
+            "ct_etd": "01/11",
+            "hcm_eta": "02/11"
+          },
+          {
+            "id": "nov26-02",
+            "vessel_name": "NHẬT VIỆT 36",
+            "hcm_voy": "V36 - 5026W",
+            "hcm_etd": "02/11",
+            "ct_eta": "03/11",
+            "ct_voy": "V36 - 5026E",
+            "ct_etd": "05/11",
+            "hcm_eta": "06/11"
+          },
+          {
+            "id": "nov26-03",
+            "vessel_name": "NHẬT VIỆT 38",
+            "hcm_voy": "V38 - 4226W",
+            "hcm_etd": "31/10",
+            "ct_eta": "01/11",
+            "ct_voy": "V38 - 4226E",
+            "ct_etd": "03/11",
+            "hcm_eta": "04/11"
+          },
+          {
+            "id": "nov26-04",
+            "vessel_name": "NHẬT VIỆT 18",
+            "hcm_voy": "V18 - 4726W",
+            "hcm_etd": "03/11",
+            "ct_eta": "04/11",
+            "ct_voy": "V18 - 4726E",
+            "ct_etd": "06/11",
+            "hcm_eta": "07/11"
+          },
+          {
+            "id": "nov26-05",
+            "vessel_name": "NHẬT VIỆT 36",
+            "hcm_voy": "V36 - 5126W",
+            "hcm_etd": "07/11",
+            "ct_eta": "08/11",
+            "ct_voy": "V36 - 5126E",
+            "ct_etd": "10/11",
+            "hcm_eta": "11/11"
+          },
+          {
+            "id": "nov26-06",
+            "vessel_name": "NHẬT VIỆT 38",
+            "hcm_voy": "V38 - 4326W",
+            "hcm_etd": "05/11",
+            "ct_eta": "06/11",
+            "ct_voy": "V38 - 4326E",
+            "ct_etd": "08/11",
+            "hcm_eta": "09/11"
+          },
+          {
+            "id": "nov26-07",
+            "vessel_name": "NHẬT VIỆT 18",
+            "hcm_voy": "V18 - 4826W",
+            "hcm_etd": "08/11",
+            "ct_eta": "09/11",
+            "ct_voy": "V18 - 4826E",
+            "ct_etd": "11/11",
+            "hcm_eta": "12/11"
+          },
+          {
+            "id": "nov26-08",
+            "vessel_name": "NHẬT VIỆT 36",
+            "hcm_voy": "V36 - 5226W",
+            "hcm_etd": "12/11",
+            "ct_eta": "13/11",
+            "ct_voy": "V36 - 5226E",
+            "ct_etd": "15/11",
+            "hcm_eta": "16/11"
+          },
+          {
+            "id": "nov26-09",
+            "vessel_name": "NHẬT VIỆT 38",
+            "hcm_voy": "V38 - 4426W",
+            "hcm_etd": "10/11",
+            "ct_eta": "11/11",
+            "ct_voy": "V38 - 4426E",
+            "ct_etd": "13/11",
+            "hcm_eta": "14/11"
+          },
+          {
+            "id": "nov26-10",
+            "vessel_name": "NHẬT VIỆT 18",
+            "hcm_voy": "V18 - 4926W",
+            "hcm_etd": "13/11",
+            "ct_eta": "14/11",
+            "ct_voy": "V18 - 4926E",
+            "ct_etd": "16/11",
+            "hcm_eta": "17/11"
+          },
+          {
+            "id": "nov26-11",
+            "vessel_name": "NHẬT VIỆT 36",
+            "hcm_voy": "V36 - 5326W",
+            "hcm_etd": "17/11",
+            "ct_eta": "18/11",
+            "ct_voy": "V36 - 5326E",
+            "ct_etd": "20/11",
+            "hcm_eta": "21/11"
+          },
+          {
+            "id": "nov26-12",
+            "vessel_name": "NHẬT VIỆT 38",
+            "hcm_voy": "V38 - 4526W",
+            "hcm_etd": "15/11",
+            "ct_eta": "16/11",
+            "ct_voy": "V38 - 4526E",
+            "ct_etd": "18/11",
+            "hcm_eta": "19/11"
+          },
+          {
+            "id": "nov26-13",
+            "vessel_name": "NHẬT VIỆT 18",
+            "hcm_voy": "V18 - 5026W",
+            "hcm_etd": "18/11",
+            "ct_eta": "19/11",
+            "ct_voy": "V18 - 5026E",
+            "ct_etd": "21/11",
+            "hcm_eta": "22/11"
+          },
+          {
+            "id": "nov26-14",
+            "vessel_name": "NHẬT VIỆT 36",
+            "hcm_voy": "V36 - 5426W",
+            "hcm_etd": "22/11",
+            "ct_eta": "23/11",
+            "ct_voy": "V36 - 5426E",
+            "ct_etd": "25/11",
+            "hcm_eta": "26/11"
+          },
+          {
+            "id": "nov26-15",
+            "vessel_name": "NHẬT VIỆT 38",
+            "hcm_voy": "V38 - 4626W",
+            "hcm_etd": "20/11",
+            "ct_eta": "21/11",
+            "ct_voy": "V38 - 4626E",
+            "ct_etd": "23/11",
+            "hcm_eta": "24/11"
+          },
+          {
+            "id": "nov26-16",
+            "vessel_name": "NHẬT VIỆT 18",
+            "hcm_voy": "V18 - 5126W",
+            "hcm_etd": "23/11",
+            "ct_eta": "24/11",
+            "ct_voy": "V18 - 5126E",
+            "ct_etd": "26/11",
+            "hcm_eta": "27/11"
+          },
+          {
+            "id": "nov26-17",
+            "vessel_name": "NHẬT VIỆT 36",
+            "hcm_voy": "V36 - 5526W",
+            "hcm_etd": "27/11",
+            "ct_eta": "28/11",
+            "ct_voy": "V36 - 5526E",
+            "ct_etd": "30/11",
+            "hcm_eta": "01/12"
+          },
+          {
+            "id": "nov26-18",
+            "vessel_name": "NHẬT VIỆT 38",
+            "hcm_voy": "V38 - 4726W",
+            "hcm_etd": "25/11",
+            "ct_eta": "26/11",
+            "ct_voy": "V38 - 4726E",
+            "ct_etd": "28/11",
+            "hcm_eta": "29/11"
+          }
+        ]
+      }
+    ],
+    "updated_at": "2026-11-17T03:37:29.519Z"
+  }
 }
