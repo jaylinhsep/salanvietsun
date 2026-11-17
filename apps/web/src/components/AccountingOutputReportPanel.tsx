@@ -515,7 +515,7 @@ export function AccountingOutputReportPanel() {
               </tr>
             </thead>
 
-            <tbody className="divide-y divide-slate-200">
+            <tbody className="divide-y divide-slate-300/80">
               {loading ? (
                 <tr>
                   <td colSpan={18} className="px-4 py-8 text-center text-slate-400">

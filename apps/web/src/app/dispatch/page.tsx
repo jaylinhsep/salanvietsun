@@ -569,7 +569,7 @@ export default function DispatchPage() {
                   <th className="px-2.5 py-2.5 text-right w-[170px]">Trạng thái / Thao tác</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-300/80">
                 {filteredVoyages.length === 0 ? (
                   <tr>
                     <td colSpan={11} className="px-4 py-8 text-center text-slate-500">

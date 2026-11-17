@@ -6,44 +6,27 @@ export interface BargeColorStyle {
 
 const FIXED_BARGE_STYLES: Record<string, BargeColorStyle> = {
   NV18: {
-    rowClass: 'bg-[#F4F7FB] hover:bg-[#EBF1F8]',
-    badgeClass: 'bg-[#ECF2F9] text-slate-700 border border-[#D7E1EE]',
-    dotClass: 'bg-sky-600/70',
+    rowClass: 'bg-[#EAD1DC] hover:bg-[#E2C2D0]',
+    badgeClass: 'bg-[#F5E6EC] text-slate-800 border border-[#D4B0C0]',
+    dotClass: 'bg-[#B45382]',
   },
   NV36: {
-    rowClass: 'bg-[#F3F8F5] hover:bg-[#EAF3ED]',
-    badgeClass: 'bg-[#EAF3ED] text-slate-700 border border-[#D4E4DA]',
-    dotClass: 'bg-emerald-600/70',
+    rowClass: 'bg-[#D9EAD3] hover:bg-[#CBE1C3]',
+    badgeClass: 'bg-[#EBF4E7] text-slate-800 border border-[#B8D4AD]',
+    dotClass: 'bg-[#4E8C43]',
   },
   NV38: {
-    rowClass: 'bg-[#FAF7F2] hover:bg-[#F3EFE6]',
-    badgeClass: 'bg-[#F4EFE6] text-slate-700 border border-[#E5DCCB]',
-    dotClass: 'bg-amber-600/70',
+    rowClass: 'bg-[#C9DAF8] hover:bg-[#B8CDF3]',
+    badgeClass: 'bg-[#E5EEFC] text-slate-800 border border-[#A5BFE9]',
+    dotClass: 'bg-[#3D6BB3]',
   },
 };
 
-const PALETTE_STYLES: BargeColorStyle[] = [
-  {
-    rowClass: 'bg-[#F6F5FA] hover:bg-[#EEEBF4]',
-    badgeClass: 'bg-[#EFECF6] text-slate-700 border border-[#DED9EC]',
-    dotClass: 'bg-indigo-500/60',
-  },
-  {
-    rowClass: 'bg-[#F4F6F6] hover:bg-[#EBF0F0]',
-    badgeClass: 'bg-[#ECEFEF] text-slate-700 border border-[#D8E0E0]',
-    dotClass: 'bg-teal-600/60',
-  },
-  {
-    rowClass: 'bg-[#F7F6F4] hover:bg-[#EFECE8]',
-    badgeClass: 'bg-[#F0EEEA] text-slate-700 border border-[#E1DDD5]',
-    dotClass: 'bg-stone-500/70',
-  },
-  {
-    rowClass: 'bg-[#F5F7FA] hover:bg-[#ECEFF5]',
-    badgeClass: 'bg-[#EDEFF5] text-slate-700 border border-[#DCE0EA]',
-    dotClass: 'bg-slate-500/70',
-  },
-];
+const OTHER_BARGE_STYLE: BargeColorStyle = {
+  rowClass: 'bg-slate-50/80 hover:bg-slate-100/90',
+  badgeClass: 'bg-white text-slate-700 border border-slate-300',
+  dotClass: 'bg-slate-400',
+};
 
 const DEFAULT_STYLE: BargeColorStyle = {
   rowClass: 'bg-white hover:bg-slate-50',
@@ -64,10 +47,5 @@ export function getBargeColorStyle(codeOrName?: string | null): BargeColorStyle 
   const key = normalizeBargeKey(codeOrName);
   if (!key) return DEFAULT_STYLE;
   if (FIXED_BARGE_STYLES[key]) return FIXED_BARGE_STYLES[key];
-
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) {
-    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
-  }
-  return PALETTE_STYLES[hash % PALETTE_STYLES.length];
+  return OTHER_BARGE_STYLE;
 }
