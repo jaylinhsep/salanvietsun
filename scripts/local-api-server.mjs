@@ -1224,28 +1224,32 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const rec = (db.voyageTallyPhotos || []).find((tp) => tp.id === tallyExtractMatch[1]);
       if (!rec) return send(res, 404, { message: 'Không tìm thấy ảnh Tally.' });
-      const bin = await readTallyImageBinary(rec);
-      if (!bin) return send(res, 400, { message: 'Không đọc được ảnh để xử lý AI.' });
-      const aiRes = await runAiContainerExtraction({
-        imageBuffer: bin.buffer,
-        mimeType: bin.mimeType,
-        overrideApiKey: body?.api_key || req.headers['x-ai-api-key'],
-      });
-      if (!aiRes.ai_configured) {
-        return send(res, 200, { ai_configured: false, message: aiRes.message, photo: rec });
+      try {
+        const bin = await readTallyImageBinary(rec);
+        if (!bin) return send(res, 400, { message: 'Không đọc được ảnh để xử lý AI.' });
+        const aiRes = await runAiContainerExtraction({
+          imageBuffer: bin.buffer,
+          mimeType: bin.mimeType,
+          overrideApiKey: body?.api_key || req.headers['x-ai-api-key'],
+        });
+        if (!aiRes.ai_configured) {
+          return send(res, 200, { ai_configured: false, message: aiRes.message, photo: rec });
+        }
+        rec.ai_status = 'EXTRACTED';
+        rec.ai_provider = aiRes.provider;
+        rec.ai_raw_text = aiRes.raw_text;
+        rec.ai_extracted_containers = aiRes.containers;
+        rec.updated_at = nowIso();
+        saveDb(db);
+        return send(res, 200, {
+          ai_configured: true,
+          provider: aiRes.provider,
+          containers: aiRes.containers,
+          photo: rec,
+        });
+      } catch (err) {
+        return send(res, 400, { message: err?.message || 'Lỗi khi gọi AI phân tích ảnh Tally.' });
       }
-      rec.ai_status = 'EXTRACTED';
-      rec.ai_provider = aiRes.provider;
-      rec.ai_raw_text = aiRes.raw_text;
-      rec.ai_extracted_containers = aiRes.containers;
-      rec.updated_at = nowIso();
-      saveDb(db);
-      return send(res, 200, {
-        ai_configured: true,
-        provider: aiRes.provider,
-        containers: aiRes.containers,
-        photo: rec,
-      });
     }
     const tallyEditedMatch = p.match(/^\/api\/dispatch\/tally-photos\/([^/]+)\/extracted$/);
     if (tallyEditedMatch && m === 'PATCH') {

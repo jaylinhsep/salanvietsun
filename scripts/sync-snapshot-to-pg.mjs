@@ -235,12 +235,13 @@ async function ensureSchema(client) {
       uploaded_by VARCHAR(120),
       notes TEXT,
       ai_status VARCHAR(30) DEFAULT 'PENDING',
-      ai_provider VARCHAR(40),
+      ai_provider TEXT,
       ai_raw_text TEXT,
       ai_extracted_containers JSONB DEFAULT '[]'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE voyage_tally_photos ALTER COLUMN ai_provider TYPE TEXT;
     CREATE INDEX IF NOT EXISTS idx_voyage_tally_photos_voyage_id ON voyage_tally_photos(voyage_id);
   `);
 }

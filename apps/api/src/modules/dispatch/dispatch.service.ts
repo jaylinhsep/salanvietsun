@@ -138,12 +138,13 @@ export class DispatchService implements OnModuleInit {
           uploaded_by VARCHAR(120),
           notes TEXT,
           ai_status VARCHAR(30) DEFAULT 'PENDING',
-          ai_provider VARCHAR(40),
+          ai_provider TEXT,
           ai_raw_text TEXT,
           ai_extracted_containers JSONB DEFAULT '[]'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        ALTER TABLE voyage_tally_photos ALTER COLUMN ai_provider TYPE TEXT;
         CREATE INDEX IF NOT EXISTS idx_voyage_tally_photos_voyage_id ON voyage_tally_photos(voyage_id);
       `);
     } catch (err: any) {
@@ -1745,51 +1746,60 @@ export class DispatchService implements OnModuleInit {
       throw new NotFoundException('Không tìm thấy ảnh Tally.');
     }
 
-    const bin = await readTallyImageBinary({
-      photoId: row.id,
-      storage_provider: row.storage_provider,
-      r2_key: row.r2_key,
-      mime_type: row.mime_type,
-    });
-    if (!bin) {
-      throw new BadRequestException('Không tải được ảnh Tally để phân tích AI.');
-    }
+    try {
+      const bin = await readTallyImageBinary({
+        photoId: row.id,
+        storage_provider: row.storage_provider,
+        r2_key: row.r2_key,
+        image_url: row.image_url,
+        mime_type: row.mime_type,
+      });
+      if (!bin) {
+        throw new BadRequestException('Không tải được ảnh Tally từ kho lưu trữ để phân tích AI.');
+      }
 
-    const aiRes = await runAiContainerExtraction({
-      imageBuffer: bin.buffer,
-      mimeType: bin.mimeType,
-      overrideApiKey,
-    });
+      const aiRes = await runAiContainerExtraction({
+        imageBuffer: bin.buffer,
+        mimeType: bin.mimeType,
+        overrideApiKey,
+      });
 
-    if (!aiRes.ai_configured) {
+      if (!aiRes.ai_configured) {
+        return {
+          ai_configured: false,
+          message: aiRes.message,
+          photo: row,
+        };
+      }
+
+      const upd = await this.db.query(
+        `
+        UPDATE voyage_tally_photos
+        SET
+          ai_status = 'EXTRACTED',
+          ai_provider = $2,
+          ai_raw_text = $3,
+          ai_extracted_containers = $4::jsonb,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        `,
+        [photoId, aiRes.provider, aiRes.raw_text, JSON.stringify(aiRes.containers)],
+      );
+
       return {
-        ai_configured: false,
-        message: aiRes.message,
-        photo: row,
+        ai_configured: true,
+        provider: aiRes.provider,
+        containers: aiRes.containers,
+        photo: upd.rows[0],
       };
+    } catch (err: any) {
+      if (err instanceof BadRequestException || err instanceof NotFoundException) {
+        throw err;
+      }
+      this.logger.error(`AI extraction failed for photo ${photoId}: ${err?.message || err}`);
+      throw new BadRequestException(err?.message || 'Lỗi khi gọi AI phân tích ảnh Tally.');
     }
-
-    const upd = await this.db.query(
-      `
-      UPDATE voyage_tally_photos
-      SET
-        ai_status = 'EXTRACTED',
-        ai_provider = $2,
-        ai_raw_text = $3,
-        ai_extracted_containers = $4::jsonb,
-        updated_at = NOW()
-      WHERE id = $1
-      RETURNING *
-      `,
-      [photoId, aiRes.provider, aiRes.raw_text, JSON.stringify(aiRes.containers)],
-    );
-
-    return {
-      ai_configured: true,
-      provider: aiRes.provider,
-      containers: aiRes.containers,
-      photo: upd.rows[0],
-    };
   }
 
   async updateTallyPhotoExtracted(photoId: string, containers: any[]) {

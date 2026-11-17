@@ -680,8 +680,8 @@ export async function syncOfflineCaptainQueue(): Promise<{
 
 export async function compressTallyImage(
   file: File,
-  maxDim = 1600,
-  quality = 0.78,
+  maxDim = 2048,
+  quality = 0.86,
 ): Promise<{
   dataUrl: string;
   mimeType: string;

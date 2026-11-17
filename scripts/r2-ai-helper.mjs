@@ -145,23 +145,36 @@ export async function uploadTallyImage({ photoId, voyageCodeOrId, buffer, mimeTy
   };
 }
 
-export async function readTallyImageBinary({ photoId, storage_provider, r2_key, mime_type }) {
+export async function readTallyImageBinary({ photoId, storage_provider, r2_key, image_url, mime_type }) {
   const mimeType = mime_type || 'image/jpeg';
-  if (storage_provider === 'r2' && r2_key) {
+  if (storage_provider === 'r2') {
     const r2 = getR2Config();
-    if (!r2.configured) return null;
-    const signed = buildAwsSigV4Headers({
-      method: 'GET',
-      endpoint: r2.endpoint,
-      bucket: r2.bucket,
-      key: r2_key,
-      accessKeyId: r2.accessKeyId,
-      secretAccessKey: r2.secretAccessKey,
-      body: '',
-    });
-    const res = await fetch(signed.url, { method: 'GET', headers: signed.headers });
-    if (!res.ok) return null;
-    return { buffer: Buffer.from(await res.arrayBuffer()), mimeType: res.headers.get('content-type') || mimeType };
+    if (r2.configured && r2_key) {
+      const signed = buildAwsSigV4Headers({
+        method: 'GET',
+        endpoint: r2.endpoint,
+        bucket: r2.bucket,
+        key: r2_key,
+        accessKeyId: r2.accessKeyId,
+        secretAccessKey: r2.secretAccessKey,
+        body: '',
+      });
+      try {
+        const res = await fetch(signed.url, { method: 'GET', headers: signed.headers });
+        if (res.ok) {
+          return { buffer: Buffer.from(await res.arrayBuffer()), mimeType: res.headers.get('content-type') || mimeType };
+        }
+      } catch {
+        // fallback to public image_url
+      }
+    }
+    if (image_url && /^https?:\/\//i.test(image_url)) {
+      const pubRes = await fetch(image_url);
+      if (pubRes.ok) {
+        return { buffer: Buffer.from(await pubRes.arrayBuffer()), mimeType: pubRes.headers.get('content-type') || mimeType };
+      }
+    }
+    return null;
   }
   const dir = ensureLocalTallyDir();
   const candidates = r2_key
@@ -272,20 +285,31 @@ export async function runAiContainerExtraction({ imageBuffer, mimeType, override
   const base64 = imageBuffer.toString('base64');
 
   if (ai.provider === 'gemini') {
-    const model = process.env.GEMINI_VISION_MODEL || 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType || 'image/jpeg', data: base64 } }] }],
-        generationConfig: { temperature: 0.1 },
-      }),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json?.error?.message || `Gemini API lỗi (${res.status})`);
-    const rawText = json?.candidates?.[0]?.content?.parts?.map((p) => p?.text || '').join('\n') || '';
-    return { ai_configured: true, provider: `gemini (${model})`, raw_text: rawText, containers: normalizeExtractedContainers(rawText) };
+    const candidateModels = Array.from(
+      new Set([process.env.GEMINI_VISION_MODEL, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite'].map((m) => String(m || '').trim()).filter(Boolean)),
+    );
+    let lastErrMsg = 'Gemini API lỗi không xác định.';
+    for (const model of candidateModels) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType || 'image/jpeg', data: base64 } }] }],
+          generationConfig: { temperature: 0.1 },
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const rawText = json?.candidates?.[0]?.content?.parts?.map((p) => p?.text || '').join('\n') || '';
+        return { ai_configured: true, provider: `gemini (${model})`, raw_text: rawText, containers: normalizeExtractedContainers(rawText) };
+      }
+      const errMsg = json?.error?.message || `Gemini API lỗi (${res.status})`;
+      lastErrMsg = `[${model}] ${errMsg}`;
+      const isModelUnavailable = res.status === 404 || /not found|not supported|deprecated|no longer available/i.test(errMsg);
+      if (!isModelUnavailable) throw new Error(lastErrMsg);
+    }
+    throw new Error(lastErrMsg);
   }
 
   const model = process.env.OPENAI_VISION_MODEL || 'gpt-4o-mini';

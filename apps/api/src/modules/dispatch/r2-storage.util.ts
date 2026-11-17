@@ -241,28 +241,46 @@ export async function readTallyImageBinary(params: {
   photoId: string;
   storage_provider: string;
   r2_key?: string | null;
+  image_url?: string | null;
   mime_type?: string | null;
 }): Promise<{ buffer: Buffer; mimeType: string } | null> {
   const mimeType = params.mime_type || 'image/jpeg';
-  if (params.storage_provider === 'r2' && params.r2_key) {
+  if (params.storage_provider === 'r2') {
     const r2 = getR2Config();
-    if (!r2.configured) return null;
-    const signed = buildAwsSigV4Headers({
-      method: 'GET',
-      endpoint: r2.endpoint,
-      bucket: r2.bucket,
-      key: params.r2_key,
-      accessKeyId: r2.accessKeyId,
-      secretAccessKey: r2.secretAccessKey,
-      body: '',
-    });
-    const res = await fetch(signed.url, { method: 'GET', headers: signed.headers });
-    if (!res.ok) return null;
-    const ab = await res.arrayBuffer();
-    return {
-      buffer: Buffer.from(ab),
-      mimeType: res.headers.get('content-type') || mimeType,
-    };
+    if (r2.configured && params.r2_key) {
+      const signed = buildAwsSigV4Headers({
+        method: 'GET',
+        endpoint: r2.endpoint,
+        bucket: r2.bucket,
+        key: params.r2_key,
+        accessKeyId: r2.accessKeyId,
+        secretAccessKey: r2.secretAccessKey,
+        body: '',
+      });
+      try {
+        const res = await fetch(signed.url, { method: 'GET', headers: signed.headers });
+        if (res.ok) {
+          const ab = await res.arrayBuffer();
+          return {
+            buffer: Buffer.from(ab),
+            mimeType: res.headers.get('content-type') || mimeType,
+          };
+        }
+      } catch {
+        // fallback to public image_url below
+      }
+    }
+    if (params.image_url && /^https?:\/\//i.test(params.image_url)) {
+      const pubRes = await fetch(params.image_url);
+      if (pubRes.ok) {
+        const ab = await pubRes.arrayBuffer();
+        return {
+          buffer: Buffer.from(ab),
+          mimeType: pubRes.headers.get('content-type') || mimeType,
+        };
+      }
+    }
+    return null;
   }
 
   const dir = ensureLocalTallyDir();
@@ -423,42 +441,65 @@ export async function runAiContainerExtraction(params: {
   const base64 = params.imageBuffer.toString('base64');
 
   if (ai.provider === 'gemini') {
-    const model = process.env.GEMINI_VISION_MODEL || 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inline_data: {
-                  mime_type: params.mimeType || 'image/jpeg',
-                  data: base64,
+    const candidateModels = Array.from(
+      new Set(
+        [
+          process.env.GEMINI_VISION_MODEL,
+          'gemini-2.5-flash',
+          'gemini-2.0-flash',
+          'gemini-2.5-flash-lite',
+        ]
+          .map((m) => String(m || '').trim())
+          .filter(Boolean),
+      ),
+    );
+
+    let lastErrMsg = 'Gemini API lỗi không xác định.';
+    for (const model of candidateModels) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inline_data: {
+                    mime_type: params.mimeType || 'image/jpeg',
+                    data: base64,
+                  },
                 },
-              },
-            ],
-          },
-        ],
-        generationConfig: { temperature: 0.1 },
-      }),
-    });
-    const json: any = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(json?.error?.message || `Gemini API lỗi (${res.status})`);
+              ],
+            },
+          ],
+          generationConfig: { temperature: 0.1 },
+        }),
+      });
+      const json: any = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const rawText =
+          json?.candidates?.[0]?.content?.parts
+            ?.map((p: any) => p?.text || '')
+            .join('\n') || '';
+        return {
+          ai_configured: true,
+          provider: `gemini (${model})`,
+          raw_text: rawText,
+          containers: normalizeExtractedContainers(rawText),
+        };
+      }
+      const errMsg = json?.error?.message || `Gemini API lỗi (${res.status})`;
+      lastErrMsg = `[${model}] ${errMsg}`;
+      const isModelUnavailable =
+        res.status === 404 ||
+        /not found|not supported|deprecated|no longer available/i.test(errMsg);
+      if (!isModelUnavailable) {
+        throw new Error(lastErrMsg);
+      }
     }
-    const rawText =
-      json?.candidates?.[0]?.content?.parts
-        ?.map((p: any) => p?.text || '')
-        .join('\n') || '';
-    return {
-      ai_configured: true,
-      provider: `gemini (${model})`,
-      raw_text: rawText,
-      containers: normalizeExtractedContainers(rawText),
-    };
+    throw new Error(lastErrMsg);
   }
 
   // OpenAI Vision fallback
