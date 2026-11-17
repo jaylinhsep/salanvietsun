@@ -17,6 +17,7 @@ import {
 import { StatusBadge } from '@/components/StatusBadge';
 import { VoyageContainersPanel } from '@/components/VoyageContainersPanel';
 import { getBargeColorStyle } from '@/lib/barge-colors';
+import { computeNextVoyageNo } from '@/lib/voyage-number';
 
 type TabKey = 'VOYAGES' | 'PORTS' | 'CUSTOMERS';
 
@@ -68,6 +69,7 @@ export default function DispatchPage() {
   const [showVoyageModal, setShowVoyageModal] = useState(false);
   const [editingVoyageId, setEditingVoyageId] = useState<string | null>(null);
   const [voyageForm, setVoyageForm] = useState(EMPTY_VOYAGE_FORM);
+  const [isManualVoyageNo, setIsManualVoyageNo] = useState(false);
 
   // Port modal
   const [showPortModal, setShowPortModal] = useState(false);
@@ -119,14 +121,33 @@ export default function DispatchPage() {
     Number(f.cont_20e || 0) + Number(f.cont_20f || 0) + (Number(f.cont_40e || 0) + Number(f.cont_40f || 0)) * 2;
 
   // --- VOYAGE HANDLERS ---
+  const suggestVoyageNoForVessel = (vesselId: string, receivedDate?: string) => {
+    const target = vessels.find((v) => v.id === vesselId);
+    const existingForVessel = voyages
+      .filter((vy) => !vesselId || vy.vessel_id === vesselId)
+      .map((vy) => vy.voyage_no);
+    return computeNextVoyageNo({
+      vesselCode: target?.code,
+      vesselName: target?.name,
+      existingVoyageNos: existingForVessel,
+      receivedDate,
+    });
+  };
+
   const openCreateVoyage = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const defaultVessel =
+      vessels.find((v) => v.code === 'NV36' || v.code === 'NV18' || v.code === 'NV38') ||
+      vessels[0];
+    const initialVesselId = defaultVessel?.id || '';
     setEditingVoyageId(null);
+    setIsManualVoyageNo(false);
     setVoyageForm({
       ...EMPTY_VOYAGE_FORM,
-      received_date: new Date().toISOString().slice(0, 10),
-      voyage_no: `VOY-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      received_date: today,
+      voyage_no: suggestVoyageNoForVessel(initialVesselId, today),
       customer_id: customers[0]?.id || '',
-      vessel_id: vessels[0]?.id || '',
+      vessel_id: initialVesselId,
       origin_port_id: ports[0]?.id || '',
       destination_port_id: ports[1]?.id || ports[0]?.id || '',
     });
@@ -881,12 +902,32 @@ export default function DispatchPage() {
             </h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Mã chuyến</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-600">Mã chuyến</label>
+                  {!editingVoyageId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsManualVoyageNo(false);
+                        setVoyageForm((prev) => ({
+                          ...prev,
+                          voyage_no: suggestVoyageNoForVessel(prev.vessel_id, prev.received_date),
+                        }));
+                      }}
+                      className="text-[11px] font-semibold text-maritime-600 hover:underline"
+                    >
+                      Tự động
+                    </button>
+                  )}
+                </div>
                 <input
                   required
-                  className="w-full border rounded-lg px-3 py-2"
+                  className="w-full border rounded-lg px-3 py-2 font-semibold"
                   value={voyageForm.voyage_no}
-                  onChange={(e) => setVoyageForm({ ...voyageForm, voyage_no: e.target.value })}
+                  onChange={(e) => {
+                    setIsManualVoyageNo(true);
+                    setVoyageForm({ ...voyageForm, voyage_no: e.target.value.toUpperCase() });
+                  }}
                 />
               </div>
               <div>
@@ -895,7 +936,17 @@ export default function DispatchPage() {
                   type="date"
                   className="w-full border rounded-lg px-3 py-2"
                   value={voyageForm.received_date}
-                  onChange={(e) => setVoyageForm({ ...voyageForm, received_date: e.target.value })}
+                  onChange={(e) => {
+                    const nextDate = e.target.value;
+                    setVoyageForm((prev) => ({
+                      ...prev,
+                      received_date: nextDate,
+                      voyage_no:
+                        !editingVoyageId && !isManualVoyageNo
+                          ? suggestVoyageNoForVessel(prev.vessel_id, nextDate)
+                          : prev.voyage_no,
+                    }));
+                  }}
                 />
               </div>
               <div>
@@ -930,7 +981,17 @@ export default function DispatchPage() {
                   required
                   className="w-full border rounded-lg px-3 py-2"
                   value={voyageForm.vessel_id}
-                  onChange={(e) => setVoyageForm({ ...voyageForm, vessel_id: e.target.value })}
+                  onChange={(e) => {
+                    const nextVesselId = e.target.value;
+                    setVoyageForm((prev) => ({
+                      ...prev,
+                      vessel_id: nextVesselId,
+                      voyage_no:
+                        !editingVoyageId && !isManualVoyageNo
+                          ? suggestVoyageNoForVessel(nextVesselId, prev.received_date)
+                          : prev.voyage_no,
+                    }));
+                  }}
                 >
                   {vessels.map((v) => (
                     <option key={v.id} value={v.id}>

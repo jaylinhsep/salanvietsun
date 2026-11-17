@@ -292,6 +292,87 @@ export class DispatchService implements OnModuleInit {
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
   }
 
+  private computeNextVoyageNoFromList(params: {
+    vesselCode?: string | null;
+    vesselName?: string | null;
+    existingVoyageNos: Array<string | null | undefined>;
+    receivedDate?: string | null;
+  }): string {
+    const rawCode = String(params.vesselCode || '').trim().toUpperCase();
+    const rawName = String(params.vesselName || '').trim().toUpperCase();
+    const dateStr =
+      this.toIsoDateOnly(params.receivedDate) || new Date().toISOString().slice(0, 10);
+    const yy = dateStr.slice(2, 4);
+    const mm = dateStr.slice(5, 7);
+    const dd = dateStr.slice(8, 10);
+
+    const usedSet = new Set(
+      params.existingVoyageNos.map((n) => String(n || '').trim().toUpperCase()).filter(Boolean),
+    );
+
+    let bargeNum: string | null = null;
+    const codeMatch = rawCode.match(/^NV(\d+)$/);
+    if (codeMatch) {
+      bargeNum = codeMatch[1];
+    } else {
+      const nameMatch = rawName.match(/(?:NHẬT VIỆT|NHAT VIET)\s*(\d+)/);
+      if (nameMatch) bargeNum = nameMatch[1];
+    }
+
+    if (bargeNum) {
+      const tripPattern = new RegExp(`^V\\.?${bargeNum}-0*(\\d+)(\\d{2})([WE])(?:\\s*-\\s*[WE])?$`, 'i');
+      let maxRank = -1;
+      for (const rawNo of params.existingVoyageNos) {
+        const no = String(rawNo || '').trim().toUpperCase();
+        const m = no.match(tripPattern);
+        if (!m) continue;
+        const seq = parseInt(m[1], 10);
+        const rowYy = m[2];
+        const dir = m[3].toUpperCase();
+        if (rowYy !== yy) continue;
+        const rank = seq * 2 + (dir === 'E' ? 1 : 0);
+        if (rank > maxRank) maxRank = rank;
+      }
+
+      let nextRank = maxRank >= 0 ? maxRank + 1 : 2;
+      while (true) {
+        const seq = Math.floor(nextRank / 2);
+        const dir = nextRank % 2 === 1 ? 'E' : 'W';
+        const candidate = `V${bargeNum}-${String(seq).padStart(2, '0')}${yy}${dir}`;
+        if (!usedSet.has(candidate)) return candidate;
+        nextRank++;
+      }
+    }
+
+    const prefix = rawCode || 'SL';
+    const base = `${prefix}-${yy}${mm}${dd}`;
+    if (!usedSet.has(base)) return base;
+    let suffix = 2;
+    while (usedSet.has(`${base}-${suffix}`)) suffix++;
+    return `${base}-${suffix}`;
+  }
+
+  private async getNextVoyageNoForVessel(
+    queryable: { query: (text: string, params?: any[]) => Promise<any> },
+    vesselId?: string | null,
+    receivedDate?: string | null,
+  ): Promise<string> {
+    if (!vesselId) {
+      return `VOY-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    }
+    const [vesselRes, vyRes] = await Promise.all([
+      queryable.query(`SELECT code, name FROM vessels WHERE id = $1 LIMIT 1`, [vesselId]),
+      queryable.query(`SELECT voyage_no FROM voyages WHERE vessel_id = $1`, [vesselId]),
+    ]);
+    const vessel = vesselRes.rows[0] || {};
+    return this.computeNextVoyageNoFromList({
+      vesselCode: vessel.code,
+      vesselName: vessel.name,
+      existingVoyageNos: vyRes.rows.map((r: any) => r.voyage_no),
+      receivedDate,
+    });
+  }
+
   private async insertPlaceholderContainers(
     queryable: { query: (text: string, params?: any[]) => Promise<any> },
     params: {
@@ -377,6 +458,11 @@ export class DispatchService implements OnModuleInit {
     );
     const plannedNm = distRes.rows[0]?.nm ?? 35.0;
     const totalTeus = this.computeTeus(dto.cont_20e, dto.cont_20f, dto.cont_40e, dto.cont_40f);
+    const resolvedReceived = dto.received_date || new Date().toISOString().slice(0, 10);
+    const resolvedVoyageNo =
+      dto.voyage_no && String(dto.voyage_no).trim()
+        ? String(dto.voyage_no).trim().toUpperCase()
+        : await this.getNextVoyageNoForVessel(this.db, dto.vessel_id, resolvedReceived);
 
     const res = await this.db.query(
       `
@@ -394,7 +480,7 @@ export class DispatchService implements OnModuleInit {
       RETURNING *
       `,
       [
-        dto.voyage_no,
+        resolvedVoyageNo,
         dto.vessel_id || null,
         dto.tugboat_id || null,
         dto.order_id || null,
@@ -404,7 +490,7 @@ export class DispatchService implements OnModuleInit {
         dto.etd || null,
         dto.eta || null,
         plannedNm,
-        dto.received_date || new Date().toISOString().slice(0, 10),
+        resolvedReceived,
         dto.pic_name || null,
         Number(dto.cont_20e || 0),
         Number(dto.cont_20f || 0),
@@ -1130,7 +1216,9 @@ export class DispatchService implements OnModuleInit {
         );
       } else {
         const voyageNo =
-          dto.voyage_no || `VOY-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+          dto.voyage_no && String(dto.voyage_no).trim()
+            ? String(dto.voyage_no).trim().toUpperCase()
+            : await this.getNextVoyageNoForVessel(client, dto.vessel_id, resolvedReceivedDate);
         resolvedVoyageNo = voyageNo;
         const vyRes = await client.query(
           `

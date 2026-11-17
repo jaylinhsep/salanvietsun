@@ -21,6 +21,66 @@ function computeTeus(c20e = 0, c20f = 0, c40e = 0, c40f = 0) {
   return Number(c20e || 0) + Number(c20f || 0) + (Number(c40e || 0) + Number(c40f || 0)) * 2;
 }
 
+function generateNextVoyageNo(db, vesselId, receivedDate) {
+  const vessel = (db.vessels || []).find((v) => v.id === vesselId);
+  if (!vessel) {
+    return `VOY-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  }
+  const rawCode = String(vessel.code || '').trim().toUpperCase();
+  const rawName = String(vessel.name || '').trim().toUpperCase();
+  const dateStr =
+    receivedDate && /^\d{4}-\d{2}-\d{2}/.test(String(receivedDate))
+      ? String(receivedDate).slice(0, 10)
+      : nowIso().slice(0, 10);
+  const yy = dateStr.slice(2, 4);
+  const mm = dateStr.slice(5, 7);
+  const dd = dateStr.slice(8, 10);
+
+  const existingForVessel = (db.voyages || [])
+    .filter((vy) => vy.vessel_id === vesselId)
+    .map((vy) => vy.voyage_no);
+  const usedSet = new Set(existingForVessel.map((n) => String(n || '').trim().toUpperCase()).filter(Boolean));
+
+  let bargeNum = null;
+  const codeMatch = rawCode.match(/^NV(\d+)$/);
+  if (codeMatch) bargeNum = codeMatch[1];
+  else {
+    const nameMatch = rawName.match(/(?:NHẬT VIỆT|NHAT VIET)\s*(\d+)/);
+    if (nameMatch) bargeNum = nameMatch[1];
+  }
+
+  if (bargeNum) {
+    const tripPattern = new RegExp(`^V\\.?${bargeNum}-0*(\\d+)(\\d{2})([WE])(?:\\s*-\\s*[WE])?$`, 'i');
+    let maxRank = -1;
+    for (const rawNo of existingForVessel) {
+      const no = String(rawNo || '').trim().toUpperCase();
+      const m = no.match(tripPattern);
+      if (!m) continue;
+      const seq = parseInt(m[1], 10);
+      const rowYy = m[2];
+      const dir = m[3].toUpperCase();
+      if (rowYy !== yy) continue;
+      const rank = seq * 2 + (dir === 'E' ? 1 : 0);
+      if (rank > maxRank) maxRank = rank;
+    }
+    let nextRank = maxRank >= 0 ? maxRank + 1 : 2;
+    while (true) {
+      const seq = Math.floor(nextRank / 2);
+      const dir = nextRank % 2 === 1 ? 'E' : 'W';
+      const candidate = `V${bargeNum}-${String(seq).padStart(2, '0')}${yy}${dir}`;
+      if (!usedSet.has(candidate)) return candidate;
+      nextRank++;
+    }
+  }
+
+  const prefix = rawCode || 'SL';
+  const base = `${prefix}-${yy}${mm}${dd}`;
+  if (!usedSet.has(base)) return base;
+  let suffix = 2;
+  while (usedSet.has(`${base}-${suffix}`)) suffix++;
+  return `${base}-${suffix}`;
+}
+
 function defaultSeedDb() {
   const port1 = { id: '11111111-1111-1111-1111-111111111101', code: 'SPITC', name: 'SPITC', region: 'TP. Hồ Chí Minh', port_type: 'PORT', geofence_radius_m: 800, lat: 10.75, lng: 106.78 };
   const port2 = { id: '11111111-1111-1111-1111-111111111102', code: 'BN', name: 'BẾN NGHÉ', region: 'TP. Hồ Chí Minh', port_type: 'PORT', geofence_radius_m: 600, lat: 10.7615, lng: 106.715 };
@@ -814,11 +874,14 @@ const server = http.createServer(async (req, res) => {
         existingVy.total_teus = projectedTeus;
       } else {
         targetVoyageId = uuid();
+        const todayDate = nowIso().slice(0, 10);
+        const voyageNo =
+          body.voyage_no && String(body.voyage_no).trim()
+            ? String(body.voyage_no).trim().toUpperCase()
+            : generateNextVoyageNo(db, body.vessel_id, todayDate);
         db.voyages.unshift({
           id: targetVoyageId,
-          voyage_no:
-            body.voyage_no ||
-            `VOY-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+          voyage_no: voyageNo,
           status: 'PLANNED',
           vessel_id: body.vessel_id,
           customer_id: first.customer_id || null,
@@ -1026,9 +1089,15 @@ const server = http.createServer(async (req, res) => {
     if (m === 'POST' && p === '/api/dispatch/voyages') {
       const body = await readBody(req);
       const total_teus = computeTeus(body.cont_20e, body.cont_20f, body.cont_40e, body.cont_40f);
+      const recDate = body.received_date || nowIso().slice(0, 10);
+      const voyageNo =
+        body.voyage_no && String(body.voyage_no).trim()
+          ? String(body.voyage_no).trim().toUpperCase()
+          : generateNextVoyageNo(db, body.vessel_id, recDate);
       const vy = {
         id: uuid(),
         ...body,
+        voyage_no: voyageNo,
         cont_20e: Number(body.cont_20e || 0),
         cont_20f: Number(body.cont_20f || 0),
         cont_40e: Number(body.cont_40e || 0),
