@@ -94,7 +94,8 @@
       "current_fuel_liters": 5600,
       "captain_name": "Lê Hoàng Nam",
       "captain_phone": "0913778899",
-      "created_at": "2026-11-14T03:00:43.495Z"
+      "created_at": "2026-11-14T03:00:43.495Z",
+      "is_vendor_barge": true
     },
     {
       "id": "22222222-2222-2222-2222-222222222204",
@@ -118,7 +119,8 @@
       "current_fuel_liters": 0,
       "captain_name": "Phạm Quốc Bảo",
       "captain_phone": "0938223344",
-      "created_at": "2026-11-14T03:00:43.495Z"
+      "created_at": "2026-11-14T03:00:43.495Z",
+      "is_vendor_barge": true
     },
     {
       "id": "77a42f15-1847-4a99-b426-4a83bcdc0dd6",
