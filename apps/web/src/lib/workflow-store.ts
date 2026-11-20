@@ -227,24 +227,20 @@ export interface WorkflowSnapshot {
 }
 
 export async function loadWorkflowSnapshot(): Promise<WorkflowSnapshot> {
-  const [vRes, pRes, cRes, vyRes] = await Promise.all([
+  const [vRes, pRes, cRes, vyRes, bRes] = await Promise.all([
     fetchApi<Vessel[]>('/fleet/vessels', FALLBACK_VESSELS),
     fetchApi<Port[]>('/dispatch/ports', FALLBACK_PORTS),
     fetchApi<Customer[]>('/orders/customers', FALLBACK_CUSTOMERS),
-    fetchApi<Voyage[]>('/dispatch/voyages', FALLBACK_VOYAGES),
+    fetchApi<Voyage[]>('/dispatch/voyages?scope=dispatch', FALLBACK_VOYAGES),
+    fetch(`${API_URL}/dispatch/bookings?scope=dispatch`, { cache: 'no-store' }).catch(() => null),
   ]);
 
   let bookings: Booking[] = [];
   let backendHasWorkflowApi = false;
-  try {
-    const bRes = await fetch(`${API_URL}/dispatch/bookings`, { cache: 'no-store' });
-    if (bRes.ok) {
-      bookings = await bRes.json();
-      backendHasWorkflowApi = true;
-    } else {
-      bookings = seedLocalBookingsIfEmpty();
-    }
-  } catch {
+  if (bRes && bRes.ok) {
+    bookings = await bRes.json();
+    backendHasWorkflowApi = true;
+  } else {
     bookings = seedLocalBookingsIfEmpty();
   }
 

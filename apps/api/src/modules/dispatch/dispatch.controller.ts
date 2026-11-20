@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { DispatchService } from './dispatch.service';
@@ -34,8 +34,8 @@ export class DispatchController {
 
   @Get('voyages')
   @ApiOperation({ summary: 'Danh sách kế hoạch chuyến & gán container theo sà lan/khách hàng' })
-  listVoyages() {
-    return this.dispatchService.listVoyages();
+  listVoyages(@Query('scope') scope?: string) {
+    return this.dispatchService.listVoyages(scope);
   }
 
   @Post('voyages')
@@ -109,8 +109,8 @@ export class DispatchController {
 
   @Get('bookings')
   @ApiOperation({ summary: 'Danh sách Booking chờ xếp tàu & đã gán chuyến' })
-  listBookings() {
-    return this.dispatchService.listBookings();
+  listBookings(@Query('scope') scope?: string) {
+    return this.dispatchService.listBookings(scope);
   }
 
   @Post('bookings')

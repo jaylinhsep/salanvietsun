@@ -827,10 +827,20 @@ const server = http.createServer(async (req, res) => {
 
     // --- BOOKINGS ---
     if (m === 'GET' && p === '/api/dispatch/bookings') {
+      const scope = url.searchParams.get('scope');
+      const activeVyIds = new Set(
+        db.voyages
+          .filter((v) => ['PLANNED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED'].includes(v.status))
+          .map((v) => v.id),
+      );
+      const list =
+        scope === 'dispatch'
+          ? db.bookings.filter((b) => b.status !== 'COMPLETED' || (b.voyage_id && activeVyIds.has(b.voyage_id)))
+          : db.bookings;
       return send(
         res,
         200,
-        db.bookings.map((b) => hydrateBooking(db, b)),
+        list.map((b) => hydrateBooking(db, b)),
       );
     }
     if (m === 'POST' && p === '/api/dispatch/bookings') {
@@ -1272,10 +1282,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (m === 'GET' && p === '/api/dispatch/voyages') {
+      const scope = url.searchParams.get('scope');
+      const list =
+        scope === 'dispatch'
+          ? db.voyages.filter((vy) => ['PLANNED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED'].includes(vy.status))
+          : db.voyages;
       return send(
         res,
         200,
-        db.voyages.map((vy) => hydrateVoyage(db, vy)),
+        list.map((vy) => hydrateVoyage(db, vy)),
       );
     }
     if (m === 'POST' && p === '/api/dispatch/voyages') {

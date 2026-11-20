@@ -260,7 +260,11 @@ export class DispatchService implements OnModuleInit {
   }
 
   // --- VOYAGES CRUD ---
-  async listVoyages() {
+  async listVoyages(scope?: string) {
+    const isDispatchScope = scope === 'dispatch';
+    const activeFilter = isDispatchScope
+      ? `WHERE voyage_id IN (SELECT id FROM voyages WHERE status IN ('PLANNED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED'))`
+      : '';
     const res = await this.db.query(`
       SELECT
         vy.id, vy.voyage_no, vy.status, vy.etd, vy.eta, vy.atd, vy.ata,
@@ -307,6 +311,7 @@ export class DispatchService implements OnModuleInit {
       LEFT JOIN (
         SELECT voyage_id, COUNT(*)::int AS tally_photo_count
         FROM voyage_tally_photos
+        ${activeFilter}
         GROUP BY voyage_id
       ) tp ON tp.voyage_id = vy.id
       LEFT JOIN (
@@ -317,6 +322,7 @@ export class DispatchService implements OnModuleInit {
           COALESCE(SUM(CASE WHEN cont_type IN ('40E', '40F') THEN 2 ELSE 1 END), 0)::int AS detail_teus,
           COALESCE(SUM(total_amount), 0)::float AS detail_revenue
         FROM voyage_containers
+        ${activeFilter}
         GROUP BY voyage_id
       ) vc ON vc.voyage_id = vy.id
       LEFT JOIN (
@@ -327,8 +333,10 @@ export class DispatchService implements OnModuleInit {
           COALESCE(SUM(total_weight_tons), 0) AS total_weight_tons
         FROM bookings
         WHERE voyage_id IS NOT NULL
+        ${isDispatchScope ? `AND voyage_id IN (SELECT id FROM voyages WHERE status IN ('PLANNED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED'))` : ''}
         GROUP BY voyage_id
       ) bk ON bk.voyage_id = vy.id
+      ${isDispatchScope ? `WHERE vy.status IN ('PLANNED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED')` : ''}
       ORDER BY COALESCE(vy.received_date, vy.created_at::date) DESC, vy.created_at DESC
     `);
     return res.rows;
@@ -982,7 +990,11 @@ export class DispatchService implements OnModuleInit {
   }
 
   // --- BOOKINGS (BƯỚC 1 & 2: GOM ĐƠN & ĐIỀU ĐỘ 1 CHẠM) ---
-  async listBookings() {
+  async listBookings(scope?: string) {
+    const whereClause =
+      scope === 'dispatch'
+        ? `WHERE b.status <> 'COMPLETED' OR vy.status IN ('PLANNED', 'DEPARTED', 'IN_TRANSIT', 'ARRIVED')`
+        : '';
     const res = await this.db.query(`
       SELECT
         b.*, b.estimated_freight::float,
@@ -1001,6 +1013,7 @@ export class DispatchService implements OnModuleInit {
       LEFT JOIN ports op ON op.id = b.origin_port_id
       LEFT JOIN ports dp ON dp.id = b.destination_port_id
       LEFT JOIN voyages vy ON vy.id = b.voyage_id
+      ${whereClause}
       ORDER BY
         CASE WHEN b.voyage_id IS NULL THEN 0 ELSE 1 END ASC,
         b.closing_time ASC NULLS LAST,
